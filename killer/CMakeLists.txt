@@ -15,6 +15,7 @@ add_library( # Sets the name of the library.
 
         # Provides a relative path to your source file(s).
         src/main/c/mt_jni.c
+        src/main/c/sigbypass_core.c
         src/main/c/xhook.c
         src/main/c/xh_core.c
         src/main/c/xh_elf.c

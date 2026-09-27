@@ -338,3 +338,161 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
     ctx.data = data;
     return old_dl_iterate_phdr(sanitizedDlCallback, &ctx);
 }
+
+
+/* ================= Step 9: probe JNI methods ================= */
+
+static int probe_dlcallback(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)size;
+    size_t *used = (size_t *)data;
+    if (info != NULL && info->dlpi_name != NULL && info->dlpi_name[0] != '\0') {
+        int n = snprintf(probe_dl_out + *used, sizeof(probe_dl_out) - *used, "%s\n", info->dlpi_name);
+        if (n > 0 && (size_t)n < sizeof(probe_dl_out) - *used) *used += (size_t)n;
+    }
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_r_s_sign_KillerApplication_refreshHooks(JNIEnv *env, jclass clazz) {
+    (void)env; (void)clazz;
+    sigb_set_state(SIGB_STATE_REENTRY);
+    xhook_refresh(0);
+    sigb_set_state(SIGB_STATE_NORMAL);
+}
+
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probeFopen(JNIEnv *env, jclass clazz, jstring jpath) {
+    (void)clazz;
+    if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
+    const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
+    if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
+    FILE *fp = fopen(path, "r");
+    (*env)->ReleaseStringUTFChars(env, jpath, path);
+    if (fp == NULL) return (*env)->NewStringUTF(env, "ERR:fopen");
+    char *buf = (char *)malloc(4096);
+    if (buf == NULL) { fclose(fp); return (*env)->NewStringUTF(env, "ERR:oom"); }
+    size_t cap = 4096, len = 0;
+    while (1) {
+        size_t rd = fread(buf + len, 1, cap - len - 1, fp);
+        len += rd;
+        if (rd == 0) break;
+        if (len + 512 >= cap) {
+            cap *= 2;
+            char *grown = (char *)realloc(buf, cap);
+            if (grown == NULL) { free(buf); fclose(fp); return (*env)->NewStringUTF(env, "ERR:oom"); }
+            buf = grown;
+        }
+    }
+    fclose(fp);
+    buf[len] = '\0';
+    jstring out = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return out;
+}
+
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpath) {
+    (void)clazz;
+    if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
+    const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
+    if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
+    char out[512];
+    struct stat st;
+    memset(&st, 0, sizeof(st));
+    if (syscall(__NR_stat, path, &st) != 0) {
+        snprintf(out, sizeof(out), "ERR:stat errno=%d", errno);
+    } else {
+        snprintf(out, sizeof(out), "dev=%ld,0x%lx ino=%lu size=%ld mode=0%o",
+                 (long)st.st_dev, (long)st.st_dev,
+                 (unsigned long)st.st_ino,
+                 (long)st.st_size,
+                 (unsigned int)st.st_mode & 07777);
+    }
+    (*env)->ReleaseStringUTFChars(env, jpath, path);
+    return (*env)->NewStringUTF(env, out);
+}
+
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probePaths(JNIEnv *env, jclass clazz, jstring jpath) {
+    (void)clazz;
+    if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
+    const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
+    if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
+    char out[1024];
+    int ok = (access(path, F_OK) == 0);
+    char *linkbuf = sigb_raw_readlink(path);
+    char *realbuf = sigb_raw_readlink(path);
+    char real[512] = "?";
+    if (realbuf == NULL) {
+        snprintf(real, sizeof(real), "ERR:readlink errno=%d", errno);
+    } else {
+        snprintf(real, sizeof(real), "%s", realbuf);
+    }
+    snprintf(out, sizeof(out), "access=%s readlink=%s realpath=%s",
+             ok ? "OK" : "NO",
+             linkbuf != NULL ? linkbuf : "?",
+             real);
+    free(linkbuf);
+    free(realbuf);
+    (*env)->ReleaseStringUTFChars(env, jpath, path);
+    return (*env)->NewStringUTF(env, out);
+}
+
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean raw) {
+    (void)clazz;
+    const char *path = "/proc/self/maps";
+    char *content = NULL;
+
+    if (raw == JNI_TRUE) {
+        sigb_set_state(SIGB_STATE_PROBE);
+        int fd = sigb_raw_open(path);
+        if (fd >= 0) {
+            content = sigb_raw_read_fd(fd);
+            syscall(__NR_close, fd);
+        }
+        sigb_set_state(SIGB_STATE_NORMAL);
+    } else {
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            content = sigb_raw_read_fd(fd);
+            syscall(__NR_close, fd);
+        }
+    }
+
+    if (content == NULL) return (*env)->NewStringUTF(env, "ERR:read");
+    jstring out = (*env)->NewStringUTF(env, content);
+    free(content);
+    return out;
+}
+
+static char probe_fd_out[8192];
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
+    (void)clazz;
+    char fd_path[64];
+    size_t used = 0;
+    probe_fd_out[0] = '\0';
+    for (int fd = 0; fd < 1024; ++fd) {
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+        char *target = sigb_raw_readlink(fd_path);
+        if (target == NULL) continue;
+        int n = snprintf(probe_fd_out + used, sizeof(probe_fd_out) - used, "fd=%d -> %s\n", fd, target);
+        if (n > 0 && (size_t)n < sizeof(probe_fd_out) - used) used += (size_t)n;
+        free(target);
+        if (used >= sizeof(probe_fd_out) - 256) break;
+    }
+    return (*env)->NewStringUTF(env, probe_fd_out);
+}
+
+static char probe_dl_out[16384];
+JNIEXPORT jstring JNICALL
+Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz) {
+    (void)clazz;
+    size_t used = 0;
+    probe_dl_out[0] = '\0';
+    sigb_set_state(SIGB_STATE_PROBE);
+    dl_iterate_phdr(probe_dlcallback, &used);
+    sigb_set_state(SIGB_STATE_NORMAL);
+    return (*env)->NewStringUTF(env, probe_dl_out);
+}

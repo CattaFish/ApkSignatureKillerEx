@@ -217,5 +217,20 @@ public class KillerApplication extends Application {
     }
 
     private static native void hookApkPath(String apkPath, String repPath);
+
+    public static native void refreshHooks();
+
+    public static native String probeFopen(String path);
+
+    public static native String probeStat(String path);
+
+    public static native String probePaths(String path);
+
+    /** Normal = 经普通 open 读（应被洗白）；Raw = 原始 syscall 直读（负对照） */
+    public static native String probeMaps(boolean raw);
+
+    public static native String probeFds();
+
+    public static native String probeDlIterate();
 }
 

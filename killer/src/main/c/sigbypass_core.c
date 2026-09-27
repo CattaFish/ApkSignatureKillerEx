@@ -348,3 +348,25 @@ char *sigb_raw_readlink(const char *path) {
     }
     return NULL;
 }
+
+
+/* ================= Step 7: proc maps detection ================= */
+
+static int sigb_self_proc_file(const char *pathname, const char *name) {
+    if (pathname == NULL || name == NULL) return 0;
+    char self_path[64];
+    char pid_path[64];
+    char thread_self_path[64];
+    snprintf(self_path, sizeof(self_path), "/proc/self/%s", name);
+    snprintf(pid_path, sizeof(pid_path), "/proc/%d/%s", (int)getpid(), name);
+    snprintf(thread_self_path, sizeof(thread_self_path), "/proc/thread-self/%s", name);
+    return strcmp(pathname, self_path) == 0
+           || strcmp(pathname, pid_path) == 0
+           || strcmp(pathname, thread_self_path) == 0;
+}
+
+int sigb_should_sanitize_proc(const char *pathname) {
+    if (pathname == NULL) return 0;
+    return sigb_self_proc_file(pathname, "maps")
+           || sigb_self_proc_file(pathname, "smaps");
+}

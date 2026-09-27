@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <malloc.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <errno.h>
@@ -48,10 +49,17 @@ static int (*old___open_2)(const char *, int);
 
 static FILE *fopenImpl(const char *pathname, const char *mode);
 static int __open_2Impl(const char *pathname, int flags);
+static int serve_sanitized_proc(const char *pathname);
 
 
 int (*old_open)(const char *, int, mode_t);
 static int openImpl(const char *pathname, int flags, mode_t mode) {
+    if ((flags & O_ACCMODE) == O_RDONLY) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            return sanitized_fd;
+        }
+    }
     if (sigb_resolve(pathname) != pathname){
         XH_LOG_INFO("REDIRECT open %s -> %s", pathname, sigb_get_rep_path());
         return old_open(sigb_get_rep_path(), flags, mode);
@@ -62,6 +70,12 @@ static int openImpl(const char *pathname, int flags, mode_t mode) {
 
 int (*old_open64)(const char *, int, mode_t);
 static int open64Impl(const char *pathname, int flags, mode_t mode) {
+    if ((flags & O_ACCMODE) == O_RDONLY) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            return sanitized_fd;
+        }
+    }
     if (sigb_resolve(pathname) != pathname){
         XH_LOG_INFO("REDIRECT open64 %s -> %s", pathname, sigb_get_rep_path());
         return old_open64(sigb_get_rep_path(), flags, mode);
@@ -72,6 +86,12 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
 
 int (*old_openat)(int, const char*, int, mode_t);
 static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
+    if ((flags & O_ACCMODE) == O_RDONLY) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            return sanitized_fd;
+        }
+    }
     if (sigb_resolve(pathname) != pathname){
         XH_LOG_INFO("REDIRECT openat %s -> %s", pathname, sigb_get_rep_path());
         return old_openat(fd, sigb_get_rep_path(), flags, mode);
@@ -82,6 +102,12 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
 
 int (*old_openat64)(int, const char*, int, mode_t);
 static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
+    if ((flags & O_ACCMODE) == O_RDONLY) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            return sanitized_fd;
+        }
+    }
     if (sigb_resolve(pathname) != pathname){
         XH_LOG_INFO("REDIRECT openat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_openat64(fd, sigb_get_rep_path(), flags, mode);
@@ -116,7 +142,9 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     xhook_register(".*\\.so$", "statx", statxImpl, (void **) &old_statx);
     xhook_register(".*\\.so$", "fopen", fopenImpl, (void **) &old_fopen);
     xhook_register(".*\\.so$", "__open_2", __open_2Impl, (void **) &old___open_2);
+    sigb_set_state(SIGB_STATE_REENTRY);
     xhook_refresh(0);
+    sigb_set_state(SIGB_STATE_NORMAL);
 }
 
 
@@ -211,6 +239,16 @@ static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int ma
 /* ================= Step 6: implementations ================= */
 
 static FILE *fopenImpl(const char *pathname, const char *mode) {
+    if (mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            FILE *fp = fdopen(sanitized_fd, mode);
+            if (fp != NULL) {
+                return fp;
+            }
+            syscall(__NR_close, sanitized_fd);
+        }
+    }
     int read_only = 0;
     if (mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL) {
         read_only = 1;
@@ -223,9 +261,42 @@ static FILE *fopenImpl(const char *pathname, const char *mode) {
 }
 
 static int __open_2Impl(const char *pathname, int flags) {
+    if ((flags & O_ACCMODE) == O_RDONLY) {
+        int sanitized_fd = serve_sanitized_proc(pathname);
+        if (sanitized_fd >= 0) {
+            return sanitized_fd;
+        }
+    }
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_INFO("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
         return old___open_2(sigb_get_rep_path(), flags);
     }
     return old___open_2(pathname, flags);
+}
+
+
+/* ================= Step 7: sanitized proc view ================= */
+
+static int serve_sanitized_proc(const char *pathname) {
+    if (pathname == NULL) return -1;
+    if (!sigb_should_sanitize_proc(pathname)) return -1;
+    if (!sigb_is_normal()) return -1;
+
+    int fd = sigb_raw_open(pathname);
+    if (fd < 0) return -1;
+    char *content = sigb_raw_read_fd(fd);
+    syscall(__NR_close, fd);
+    if (content == NULL) return -1;
+
+    int is_smaps = (strstr(pathname, "smaps") != NULL);
+    char *clean = sigb_sanitize_maps(content, is_smaps);
+    free(content);
+    if (clean == NULL) return -1;
+
+    int memfd = sigb_create_memfd("npatch_proc_view", clean, strlen(clean));
+    free(clean);
+    if (memfd < 0) return -1;
+
+    XH_LOG_INFO("SANITIZED %s -> memfd:npatch_proc_view", pathname);
+    return memfd;
 }

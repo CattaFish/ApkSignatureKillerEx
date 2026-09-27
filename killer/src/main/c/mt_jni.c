@@ -342,6 +342,17 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
 
 /* ================= Step 9: probe JNI methods ================= */
 
+static char probe_fd_out[8192];
+static char probe_dl_out[16384];
+
+#if defined(__aarch64__) || defined(__x86_64__)
+#define SIGB_NR_STAT __NR_newfstatat
+#else
+#define SIGB_NR_STAT __NR_fstatat64
+#endif
+
+
+
 static int probe_dlcallback(struct dl_phdr_info *info, size_t size, void *data) {
     (void)size;
     size_t *used = (size_t *)data;
@@ -396,18 +407,31 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
     if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
-    char out[512];
+
+    char out[1024];
+
+    /* normal view: libc stat()，会被 statImpl GOT hook 重定向到 origin.apk */
     struct stat st;
     memset(&st, 0, sizeof(st));
-    if (syscall(__NR_stat, path, &st) != 0) {
-        snprintf(out, sizeof(out), "ERR:stat errno=%d", errno);
+    if (stat(path, &st) == 0) {
+        snprintf(out, sizeof(out), "normal: dev=%lx ino=%lu size=%ld",
+                 (unsigned long)st.st_dev, (unsigned long)st.st_ino, (long)st.st_size);
     } else {
-        snprintf(out, sizeof(out), "dev=%ld,0x%lx ino=%lu size=%ld mode=0%o",
-                 (long)st.st_dev, (long)st.st_dev,
-                 (unsigned long)st.st_ino,
-                 (long)st.st_size,
-                 (unsigned int)st.st_mode & 07777);
+        snprintf(out, sizeof(out), "normal: ERR errno=%d", errno);
     }
+
+    /* raw view: 原始 syscall 绕过 hook，拿到真实 base.apk 的 stat */
+    struct stat raw_st;
+    memset(&raw_st, 0, sizeof(raw_st));
+    if (syscall(SIGB_NR_STAT, AT_FDCWD, path, &raw_st, 0) == 0) {
+        char raw_part[512];
+        snprintf(raw_part, sizeof(raw_part), " | raw: dev=%lx ino=%lu size=%ld",
+                 (unsigned long)raw_st.st_dev, (unsigned long)raw_st.st_ino, (long)raw_st.st_size);
+        strncat(out, raw_part, sizeof(out) - strlen(out) - 1);
+    } else {
+        strncat(out, " | raw: ERR", sizeof(out) - strlen(out) - 1);
+    }
+
     (*env)->ReleaseStringUTFChars(env, jpath, path);
     return (*env)->NewStringUTF(env, out);
 }
@@ -466,7 +490,6 @@ Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean ra
     return out;
 }
 
-static char probe_fd_out[8192];
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
     (void)clazz;
@@ -485,7 +508,6 @@ Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
     return (*env)->NewStringUTF(env, probe_fd_out);
 }
 
-static char probe_dl_out[16384];
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz) {
     (void)clazz;

@@ -15,41 +15,41 @@ const char *repPath__;
 
 int (*old_open)(const char *, int, mode_t);
 static int openImpl(const char *pathname, int flags, mode_t mode) {
-    //XH_LOG_ERROR("open: %s", pathname);
     if (strcmp(pathname, apkPath__) == 0){
-        //XH_LOG_ERROR("replace -> %s", repPath__);
+        XH_LOG_INFO("REDIRECT open %s -> %s", pathname, repPath__);
         return old_open(repPath__, flags, mode);
     }
+    XH_LOG_INFO("PASS open %s", pathname);
     return old_open(pathname, flags, mode);
 }
 
 int (*old_open64)(const char *, int, mode_t);
 static int open64Impl(const char *pathname, int flags, mode_t mode) {
-    //XH_LOG_ERROR("open64: %s", pathname);
     if (strcmp(pathname, apkPath__) == 0){
-        //XH_LOG_ERROR("replace -> %s", repPath__);
+        XH_LOG_INFO("REDIRECT open64 %s -> %s", pathname, repPath__);
         return old_open64(repPath__, flags, mode);
     }
+    XH_LOG_INFO("PASS open64 %s", pathname);
     return old_open64(pathname, flags, mode);
 }
 
 int (*old_openat)(int, const char*, int, mode_t);
 static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
-    //XH_LOG_ERROR("openat: %s", pathname);
     if (strcmp(pathname, apkPath__) == 0){
-        //XH_LOG_ERROR("replace -> %s", repPath__);
+        XH_LOG_INFO("REDIRECT openat %s -> %s", pathname, repPath__);
         return old_openat(fd, repPath__, flags, mode);
     }
+    XH_LOG_INFO("PASS openat %s", pathname);
     return old_openat(fd, pathname, flags, mode);
 }
 
 int (*old_openat64)(int, const char*, int, mode_t);
 static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
-    //XH_LOG_ERROR("openat64: %s", pathname);
     if (strcmp(pathname, apkPath__) == 0){
-        //XH_LOG_ERROR("replace -> %s", repPath__);
+        XH_LOG_INFO("REDIRECT openat64 %s -> %s", pathname, repPath__);
         return old_openat64(fd, repPath__, flags, mode);
     }
+    XH_LOG_INFO("PASS openat64 %s", pathname);
     return old_openat64(fd, pathname, flags, mode);
 }
 

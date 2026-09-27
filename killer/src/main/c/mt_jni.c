@@ -11,6 +11,7 @@
 #include <sys/statfs.h>
 #include <sys/vfs.h>
 #include <string.h>
+#include <stdio.h>
 #include "xhook.h"
 #include "xh_log.h"
 #include "sigbypass_core.h"
@@ -40,6 +41,13 @@ static int stat64Impl(const char *pathname, struct stat64 *st);
 static int lstat64Impl(const char *pathname, struct stat64 *st);
 static int statfsImpl(const char *pathname, struct statfs *st);
 static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx);
+
+/* ================= Step 6: stdio + open2 ================= */
+static FILE *(*old_fopen)(const char *, const char *);
+static int (*old___open_2)(const char *, int);
+
+static FILE *fopenImpl(const char *pathname, const char *mode);
+static int __open_2Impl(const char *pathname, int flags);
 
 
 int (*old_open)(const char *, int, mode_t);
@@ -106,6 +114,8 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     xhook_register(".*\\.so$", "lstat64", lstat64Impl, (void **) &old_lstat64);
     xhook_register(".*\\.so$", "statfs", statfsImpl, (void **) &old_statfs);
     xhook_register(".*\\.so$", "statx", statxImpl, (void **) &old_statx);
+    xhook_register(".*\\.so$", "fopen", fopenImpl, (void **) &old_fopen);
+    xhook_register(".*\\.so$", "__open_2", __open_2Impl, (void **) &old___open_2);
     xhook_refresh(0);
 }
 
@@ -196,4 +206,26 @@ static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int ma
         return old_statx(dirfd, sigb_get_rep_path(), flags, mask, stx);
     }
     return old_statx(dirfd, pathname, flags, mask, stx);
+}
+
+/* ================= Step 6: implementations ================= */
+
+static FILE *fopenImpl(const char *pathname, const char *mode) {
+    int read_only = 0;
+    if (mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL) {
+        read_only = 1;
+    }
+    if (read_only && sigb_resolve(pathname) != pathname) {
+        XH_LOG_INFO("REDIRECT fopen %s -> %s", pathname, sigb_get_rep_path());
+        return old_fopen(sigb_get_rep_path(), mode);
+    }
+    return old_fopen(pathname, mode);
+}
+
+static int __open_2Impl(const char *pathname, int flags) {
+    if (sigb_resolve(pathname) != pathname) {
+        XH_LOG_INFO("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
+        return old___open_2(sigb_get_rep_path(), flags);
+    }
+    return old___open_2(pathname, flags);
 }

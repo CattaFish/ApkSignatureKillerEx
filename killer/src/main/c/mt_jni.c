@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <link.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -50,6 +51,17 @@ static int (*old___open_2)(const char *, int);
 static FILE *fopenImpl(const char *pathname, const char *mode);
 static int __open_2Impl(const char *pathname, int flags);
 static int serve_sanitized_proc(const char *pathname);
+
+/* ================= Step 8: dl_iterate_phdr ================= */
+static int (*old_dl_iterate_phdr)(int (*)(struct dl_phdr_info *, size_t, void *), void *);
+
+struct DlIterateCtx {
+    int (*callback)(struct dl_phdr_info *, size_t, void *);
+    void *data;
+};
+
+static int sanitizedDlCallback(struct dl_phdr_info *info, size_t size, void *data);
+static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void *), void *data);
 
 
 int (*old_open)(const char *, int, mode_t);
@@ -142,6 +154,7 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     xhook_register(".*\\.so$", "statx", statxImpl, (void **) &old_statx);
     xhook_register(".*\\.so$", "fopen", fopenImpl, (void **) &old_fopen);
     xhook_register(".*\\.so$", "__open_2", __open_2Impl, (void **) &old___open_2);
+    xhook_register(".*\\.so$", "dl_iterate_phdr", dlIteratePhdrImpl, (void **) &old_dl_iterate_phdr);
     sigb_set_state(SIGB_STATE_REENTRY);
     xhook_refresh(0);
     sigb_set_state(SIGB_STATE_NORMAL);
@@ -299,4 +312,29 @@ static int serve_sanitized_proc(const char *pathname) {
 
     XH_LOG_INFO("SANITIZED %s -> memfd:npatch_proc_view", pathname);
     return memfd;
+}
+
+/* ================= Step 8: dl_iterate_phdr implementations ================= */
+
+static int sanitizedDlCallback(struct dl_phdr_info *info, size_t size, void *data) {
+    struct DlIterateCtx *ctx = (struct DlIterateCtx *)data;
+    if (ctx == NULL || ctx->callback == NULL) return 0;
+    if (info != NULL && sigb_contains_sensitive_word(info->dlpi_name)) {
+        return 0;
+    }
+    return ctx->callback(info, size, ctx->data);
+}
+
+static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void *), void *data) {
+    if (old_dl_iterate_phdr == NULL) {
+        errno = ENOSYS;
+        return 0;
+    }
+    if (!sigb_is_normal() || callback == NULL) {
+        return old_dl_iterate_phdr(callback, data);
+    }
+    struct DlIterateCtx ctx;
+    ctx.callback = callback;
+    ctx.data = data;
+    return old_dl_iterate_phdr(sanitizedDlCallback, &ctx);
 }

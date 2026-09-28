@@ -88,11 +88,19 @@ def main():
     if smali_target is None:
         smali_target = os.path.join(DECODED, "smali")
         os.makedirs(smali_target, exist_ok=True)
-    shutil.copytree(KILLER_SMALI, smali_target, dirs_exist_ok=True)
-    print(f"[ok] smali 注入到 {smali_target}")
+    smali_injected = 0
+    for item in os.listdir(KILLER_SMALI):
+        src = os.path.join(KILLER_SMALI, item)
+        dst = os.path.join(smali_target, item)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+        smali_injected += 1
+    print(f"[ok] smali 逐项合并复制到 {smali_target}（{smali_injected} 项）")
 
-    # 6. Application 注入：有自定义 Application 则在 onCreate 插 init；无则替换 android:name
-    app_match = re.search(r'android:name="([^"]+)"', manifest)
+    # 6. Application 注入：只处理 <application> 标签的 android:name
+    app_match = re.search(r'<application[^>]*android:name="([^"]+)"', manifest)
     if app_match:
         app_cls = app_match.group(1)
         if app_cls.startswith("."):
@@ -105,8 +113,8 @@ def main():
             print(f"[ok] 已注入 init 到原 Application: {app_cls}")
         else:
             new_manifest = re.sub(
-                r'android:name="[^"]*"',
-                'android:name="r.s.sign.KillerApplication"',
+                r'(<application[^>]*android:name=")[^"]*(")',
+                r'\1r.s.sign.KillerApplication\2',
                 manifest, count=1)
             open(manifest_path, "w", encoding="utf-8").write(new_manifest)
             print(f"[warn] 找不到 {app_cls} 的 smali，替换 android:name 为 KillerApplication")

@@ -62,13 +62,14 @@ intptr_t openAt(intptr_t fd, const char *path, intptr_t flag) {
 JNIEXPORT jint JNICALL
 Java_r_s_test_MainActivity_openAt(JNIEnv *env, jclass clazz, jstring path) {
     (void)clazz;
-    (void)path;  /* 负对照负对照：忽略传入的 base.apk 路径 */
-    /* 直接以真实路径硬编码走 SVC，绕过所有用户态 hook，确保永远看到真实文件 */
-    const char *real = "/data/app/~~NZ9RsQS3joxlWkUU6H2ZSg==/r.s.sign-ur1JW3YF29ykTT39E8soZg==/base.apk";
-    __android_log_print(ANDROID_LOG_INFO, "openAt", "NEGATIVE-CTRL open real base.apk: %s", real);
-    int fd = openAt(AT_FDCWD, real, O_RDONLY);
-    if (fd < 0) {
-        __android_log_print(ANDROID_LOG_WARN, "openAt", "NEGATIVE-CTRL open failed errno=%d (expected to FAIL)", errno);
-    }
-    return fd;
+    if (path == NULL) return -1;
+    const char *p = (*env)->GetStringUTFChars(env, path, NULL);
+    if (p == NULL) return -1;
+    /* 负对照：用 JNI 传入的当前真实 base.apk 路径直接 SVC，
+       绕过所有用户态 hook，必须能看到真实安装文件。 */
+    __android_log_print(ANDROID_LOG_INFO, "openAt", "NEGATIVE-CTRL open real base.apk: %s", p);
+    intptr_t fd = openAt(AT_FDCWD, p, O_RDONLY);
+    __android_log_print(ANDROID_LOG_INFO, "openAt", "NEGATIVE-CTRL fd=%d (负值=真实errno取负)", (int)fd);
+    (*env)->ReleaseStringUTFChars(env, path, p);
+    return (jint)fd;
 }

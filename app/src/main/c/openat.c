@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <string.h>
+#include <errno.h>
 #include "openat.h"
 #include <jni.h>
 #include <android/log.h>

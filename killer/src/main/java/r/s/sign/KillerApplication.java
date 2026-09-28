@@ -32,19 +32,20 @@ public class KillerApplication extends Application {
         // Replace the following package name with your own
         String packageName = "r.s.sign";
         // Replace the following signature data with your own
-        String signatureData = "MIICwzCCAaugAwIBAgIERUjRgzANBgkqhkiG9w0BAQsFADASMRAwDgYDVQQDEwdBbmRyb2lkMB4X\n" +
-                "DTIyMTIyNDE0NDkzMloXDTQ3MTIxODE0NDkzMlowEjEQMA4GA1UEAxMHQW5kcm9pZDCCASIwDQYJ\n" +
-                "KoZIhvcNAQEBBQADggEPADCCAQoCggEBAKjVjd0eL4NPJW4uBR40hDkHtwdTQ7INP3hqgIs7U/kM\n" +
-                "gck2MtNIFSPYJVDZKwuLWgZLAKSDu9607indxUWftfTwJ9ynUfzoVq39+RAkRqe/XnL5WdLM0v5H\n" +
-                "CRtJW/nPBevunhJdoelCJJY1MsAl+WJCpSdfkkkeC0uXYeVYzCVwietIMfHEJOdEvjdXna0mdfuR\n" +
-                "1NqA85K8RGj9FLEdOKy0ZnMQbHzCp1/FwJSXpOqAuoKsttrmAji7FfsqXVRhk+dTBBGybCzVtaDH\n" +
-                "sIGyKzdsF2mKUPL3f0Q8XLKbkHRLmHGdVQlysIrrH7kn6Bx82cZTuYdPBUkrBO6w2NdMa+UCAwEA\n" +
-                "AaMhMB8wHQYDVR0OBBYEFNL0ebiSTntg/5Hcar3/MEUdlYRHMA0GCSqGSIb3DQEBCwUAA4IBAQBg\n" +
-                "v60JCBcJT+unHuVJge2wqEWjoUXV4JJG0Vn6kURbfiiC2rAtFOq6CFk+50HXyg2ZahosQ4ZPf8oT\n" +
-                "yG1/+JQaw9QUvB4TtwwdCr9i9IvAjjAFT6ariY0bOJNJvTjsmHJMptjNFQt4DPdveuknQv3Ztemb\n" +
-                "5BaxlpTegSZzL1ReOpKIygWf7qTqDnTtZsipt/OMttkn/dnhA9iiGJ5Jy+HLXQOc7+QgTYGPyAX5\n" +
-                "2IcWd9l5OrWShpflwsNHsAAU5MMAO/sWR/F/7zxKa50Ve67ta/7rUOkkcD3D0taUBsUeAo6n6rSs\n" +
-                "9Rk4tPEQRm59UJoof9cho7PxsMcTGb9UiNuJ\n";
+                String signatureData = "MIIDBDCCAeygAwIBAgIJAKUYjx3CbzZUMA0GCSqGSIb3DQEBCwUAMC8xCzAJBgNVBAYTAlVTMQ8w\n" +
+                "DQYDVQQKEwZPcmlnaW4xDzANBgNVBAMTBk9yaWdpbjAgFw0yNjA5MjgxMDU5NDVaGA8yMDU0MDIx\n" +
+                "MzEwNTk0NVowLzELMAkGA1UEBhMCVVMxDzANBgNVBAoTBk9yaWdpbjEPMA0GA1UEAxMGT3JpZ2lu\n" +
+                "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArYANZDTR8oCtl0zZum80EM0isoBKW2Ka\n" +
+                "nTo0rK7d6Ueju8CebRfCVIFy561tM2C0wWr9ZnW1wBpdKNfjwfI65bixiNs3yFVzBOsRt5aa5roC\n" +
+                "TeZx6dXTXv1WkJvKbY2ixgvS9lKyunUktQBZaMNJHRlPckJ7T4zevGi3tcB4zLwJ21ZOe8j6rQcM\n" +
+                "8FLubhwTOHyG+zyjxVeNyXz7+qu8I+zTVKMoMvOSSstRmgV0cUiJuCpH1voMzcfwYc6l/ak0/dWS\n" +
+                "pOs+/m6vu6XabVDCDjAigO2lsyBMnhsC9orh2qxfUBnahY4tGQI+yJ6qHpmy+JJzJnujO00/sXmy\n" +
+                "wUnJuwIDAQABoyEwHzAdBgNVHQ4EFgQUndwSFLnD4NOLc56aB6O5KGi1e1AwDQYJKoZIhvcNAQEL\n" +
+                "BQADggEBADR0nEcy+jIhjpbBVialX8HZFHcHEa0Q7AWAOK4SAfkEXiLH3NGc5xOTucahCzNuyxjz\n" +
+                "X1QUgIzW1Zf9qFceMW6UZWd+WHWoZmEIwQH9iW9aMRzjpF9XnWpHVRgaHc/nEbMG/0KFrPZFKeSd\n" +
+                "5OiEqoE1h+jv/XYQPJ+/rMidHOybg+lU8HDk0Gq/xWZO9Pfh8EpzenJErlT9TAx+hnO9EkCKDViF\n" +
+                "Cq3w5JE2vmfiyWLlsgCb+zPeD0B577GlJzrroQEmlp0npk71dDAzCTn/1QUyWJlgOzQLRYXbLc89\n" +
+                "sfXP9V4RWj4JHlJll4V85WkGesaHdWsajf4Ac/fJ44ufgTc=";
         killPM(packageName, signatureData);
         killOpen(packageName);
     }

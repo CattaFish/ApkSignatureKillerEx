@@ -28,12 +28,12 @@ jobs:
           # 安装 build.gradle 中指定的 NDK 版本 27.0.11902837
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.11902837"
 
-      - name: Ensure fake.jks Exists
+      - name: Ensure origin.jks Exists
         run: |
-          # 检查根目录下是否存在 app/build.gradle 所需的 fake.jks，若不存在则自动生成兼容签名文件
-          if [ ! -f "fake.jks" ]; then
-            echo "Generating fake.jks..."
-            keytool -genkeypair -v -keystore fake.jks -alias key0 \
+          # 检查根目录下是否存在 app/build.gradle 所需的 origin.jks，若不存在则自动生成兼容签名文件
+          if [ ! -f "origin.jks" ]; then
+            echo "Generating origin.jks..."
+            keytool -genkeypair -v -keystore origin.jks -alias key0 \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass 123456 -keypass 123456 \
               -dname "CN=Android, O=Android, C=US"

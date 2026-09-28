@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
 
         // The following demonstrates three ways to get the MD5 of a signature
 
-        String signatureExpected = "3bf8931788824c6a1f2c6f6ff80f6b21";
+        String signatureExpected = "1fb11e8214ae8b8c259aa9cd87387ac0";
         String signatureFromAPI = md5(signatureFromAPI());
         String signatureFromAPK = md5(signatureFromAPK());
         String signatureFromSVC = md5(signatureFromSVC());

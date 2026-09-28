@@ -10,10 +10,11 @@ on:
       - 'killer/**'
   workflow_dispatch:
     inputs:
-      apk:
-        description: 'APK 文件（拖入即可，自动修补并签名）'
-        required: true
-        type: file
+      apk_url:
+        description: 'APK 直链 URL（留空则处理根目录 origin.apk）'
+        required: false
+        type: string
+        default: 
 
 jobs:
   process:

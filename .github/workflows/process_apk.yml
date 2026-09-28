@@ -50,10 +50,12 @@ jobs:
           unzip -o -q killer/build/outputs/aar/killer-release.aar 'jni/*' -d work_killer
           HIDDEN=$(find ~/.gradle/caches/modules-2/files-2.1/org.lsposed.hiddenapibypass -name '*.jar' 2>/dev/null | head -1)
           if [ -z "$HIDDEN" ]; then
-            echo "hiddenapibypass not in gradle cache, downloading..."
-            curl -fL --retry 3 -sS -o work_killer/hiddenapibypass.jar \
-              https://repo.maven.apache.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/4.3/hiddenapibypass-4.3.jar
-            HIDDEN=work_killer/hiddenapibypass.jar
+            echo "hiddenapibypass not in gradle cache, downloading AAR 6.1..."
+            curl -fL --retry 3 -sS -o work_killer/hiddenapibypass.aar \
+              https://repo.maven.apache.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/6.1/hiddenapibypass-6.1.aar
+            mkdir -p work_killer/hiddenapibypass
+            unzip -o -q work_killer/hiddenapibypass.aar classes.jar -d work_killer/hiddenapibypass
+            HIDDEN=work_killer/hiddenapibypass/classes.jar
           fi
           echo "HIDDEN_JAR=$HIDDEN"
           "$ANDROID_HOME/build-tools/34.0.0/d8" \

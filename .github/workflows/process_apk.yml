@@ -36,7 +36,7 @@ jobs:
 
       - name: Set up baksmali
         run: |
-          wget -q https://github.com/baksmali/smali/releases/download/3.0.10/smali-3.0.10.jar -O baksmali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/3.0.10/baksmali-3.0.10-fat.jar -O baksmali.jar
           echo "BAKSMALI_JAR=$PWD/baksmali.jar" >> "$GITHUB_ENV"
 
       - name: Build killer module

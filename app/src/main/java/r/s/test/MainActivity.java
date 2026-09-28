@@ -17,6 +17,7 @@ import android.widget.TextView;
 import r.s.sign.KillerApplication;
 
 import java.io.File;
+import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -226,7 +227,24 @@ public class MainActivity extends Activity {
 
         // ch4: native fopen（经 hook 应读到 origin.apk -> 真签名）
         byte[] fopenData = KillerApplication.probeFopen(apkPath);
-        String md5Fopen = md5(fopenData);
+        String md5Fopen = "ERR";
+        if (fopenData != null) {
+            try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(fopenData))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.getName().matches("(META-INF/.*)\\.(RSA|DSA|EC)")) {
+                        CertificateFactory cf = CertificateFactory.getInstance("X509");
+                        X509Certificate cert = (X509Certificate) cf.generateCertificate(zis);
+                        md5Fopen = md5(cert.getEncoded());
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                md5Fopen = "ERR:" + e.getClass().getSimpleName();
+            }
+        } else {
+            md5Fopen = "ERR:null";
+        }
         boolean pass4 = md5Fopen.equals(signatureExpected);
         appendProbe(sb, "ch4 native_fopen: ", md5Fopen + (pass4 ? " (PASS)" : " (FAIL)"), pass4 ? Color.BLUE : Color.RED);
 
@@ -255,9 +273,11 @@ public class MainActivity extends Activity {
             originIno = extractIno(repStat, 0);
         }
         boolean pass7 = normSens == 0 && normApkIno == originIno && normApkIno > 0;
+        boolean mapsEqual = normMaps != null && normMaps.equals(rawMaps);
         appendProbe(sb, "ch7 maps: ",
                 "norm_sens=" + normSens + " raw_sens=" + rawSens
                         + " inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
+                        + " norm==raw:" + mapsEqual
                         + (pass7 ? " (PASS)" : " (CHECK)"),
                 pass7 ? Color.BLUE : Color.RED);
 

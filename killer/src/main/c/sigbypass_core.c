@@ -1,4 +1,11 @@
 #include "sigbypass_core.h"
+#include "xh_log.h"
+
+#if defined(__aarch64__) || defined(__x86_64__)
+#define SIGB_CORE_STAT_NR __NR_newfstatat
+#else
+#define SIGB_CORE_STAT_NR __NR_fstatat64
+#endif
 
 #include <stdlib.h>
 #include <errno.h>
@@ -7,6 +14,7 @@
 #include <linux/memfd.h>
 #include <linux/stat.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -188,14 +196,18 @@ static int sigb_path_matches_apk(const char *path) {
 static int sigb_query_rep_id(char *dev_out, size_t dev_size, unsigned long long *inode_out) {
     const char *rep = sigb_get_rep_path();
     if (rep == NULL || dev_out == NULL || inode_out == NULL || dev_size == 0) return 0;
-    struct statx stx;
-    memset(&stx, 0, sizeof(stx));
-    long rc = syscall(__NR_statx, AT_FDCWD, rep, 0, STATX_BASIC_STATS, &stx);
-    if (rc != 0) return 0;
-    snprintf(dev_out, dev_size, "%02x:%02x",
-             (unsigned int)(stx.stx_dev_major & 0xff),
-             (unsigned int)(stx.stx_dev_minor & 0xff));
-    *inode_out = (unsigned long long)stx.stx_ino;
+    struct stat st;
+    memset(&st, 0, sizeof(st));
+    long rc = syscall(SIGB_CORE_STAT_NR, AT_FDCWD, rep, &st, 0);
+    if (rc != 0) {
+        XH_LOG_ERROR("sigb_query_rep_id: fstatat %s failed errno=%d", rep, errno);
+        return 0;
+    }
+    unsigned int major = (unsigned int)(((unsigned long long)st.st_dev >> 8) & 0xfff);
+    unsigned int minor = (unsigned int)(st.st_dev & 0xff)
+                         | (unsigned int)(((unsigned long long)st.st_dev >> 12) & 0xfff00);
+    snprintf(dev_out, dev_size, "%02x:%02x", major & 0xff, minor & 0xff);
+    *inode_out = (unsigned long long)st.st_ino;
     return 1;
 }
 

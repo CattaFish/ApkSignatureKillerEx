@@ -14,7 +14,9 @@ import android.text.style.ForegroundColorSpan;
 import android.util.Base64;
 import android.util.Log;
 import android.widget.TextView;
+import r.s.sign.KillerApplication;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -22,6 +24,8 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Enumeration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -40,6 +44,9 @@ public class MainActivity extends Activity {
     }
 
     private static native int openAt(String path);
+
+    private static final String TAG = "SigDetector";
+    private String repPath;
 
     @SuppressLint("SetTextI18n")
     @Override
@@ -81,6 +88,8 @@ public class MainActivity extends Activity {
         } else {
             Log.e("SignatureData", "Signature data is null");
         }
+
+        runDetectors(sb, signatureExpected);
 
         msg.setText(sb);
     }
@@ -156,6 +165,115 @@ public class MainActivity extends Activity {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
+    }
+
+
+    private static final String[] SENS_WORDS = {
+            "frida", "rwxp", "zygisk", "riru", "lsposed", "xposed",
+            "/data/local/tmp", "/data/adb/"
+    };
+    private static final Pattern RE_INO = Pattern.compile("ino=(\\d+)");
+    private static final Pattern RE_MAP_INO = Pattern.compile("^[0-9a-f]+-[0-9a-f]+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+");
+
+    private String findRepPath() {
+        String[] candidates = {"/data/user/0/r.s.sign/origin.apk", "/data/data/r.s.sign/origin.apk"};
+        for (String c : candidates) {
+            if (new File(c).exists()) return c;
+        }
+        return null;
+    }
+
+    private long extractIno(String statStr, int index) {
+        if (statStr == null) return -1;
+        String[] parts = statStr.split("\\|");
+        if (parts.length <= index) return -1;
+        Matcher m = RE_INO.matcher(parts[index]);
+        return m.find() ? Long.parseLong(m.group(1)) : -1;
+    }
+
+    private int countSensitiveWords(String text) {
+        if (text == null) return 0;
+        String lower = text.toLowerCase();
+        int count = 0;
+        for (String w : SENS_WORDS) {
+            if (lower.contains(w)) count++;
+        }
+        return count;
+    }
+
+    private long extractMapsApkInode(String maps, String apkPath) {
+        if (maps == null || apkPath == null) return -1;
+        for (String line : maps.split("\n")) {
+            if (line.contains(apkPath)) {
+                Matcher m = RE_MAP_INO.matcher(line);
+                if (m.find()) return Long.parseLong(m.group(1));
+            }
+        }
+        return -1;
+    }
+
+    @SuppressLint("SetTextI18n")
+    private void appendProbe(SpannableStringBuilder sb, String header, String value, int color) {
+        append(sb, header, value, color);
+        Log.i(TAG, header + value);
+    }
+
+    @SuppressLint("SetTextI18n")
+    private void runDetectors(SpannableStringBuilder sb, String signatureExpected) {
+        KillerApplication.refreshHooks();
+        String apkPath = getPackageResourcePath();
+        if (repPath == null) repPath = findRepPath();
+
+        // ch4: native fopen（经 hook 应读到 origin.apk -> 真签名）
+        byte[] fopenData = KillerApplication.probeFopen(apkPath);
+        String md5Fopen = md5(fopenData);
+        boolean pass4 = md5Fopen.equals(signatureExpected);
+        appendProbe(sb, "ch4 native_fopen: ", md5Fopen + (pass4 ? " (PASS)" : " (FAIL)"), pass4 ? Color.BLUE : Color.RED);
+
+        // ch5: stat normal(被hook) vs raw(原始syscall)
+        String statStr = KillerApplication.probeStat(apkPath);
+        long normalIno = extractIno(statStr, 0);
+        long rawIno = extractIno(statStr, 1);
+        boolean pass5 = normalIno != rawIno && normalIno > 0;
+        appendProbe(sb, "ch5 stat norm/raw: ", "normal_ino=" + normalIno + " raw_ino=" + rawIno + (pass5 ? " (HOOKED)" : " (SAME/MISSED)"), pass5 ? Color.BLUE : Color.RED);
+
+        // ch6: 路径族
+        String pathsStr = KillerApplication.probePaths(apkPath);
+        boolean pass6 = pathsStr.contains("access=OK") && pathsStr.contains("origin.apk");
+        appendProbe(sb, "ch6 paths: ", pathsStr + (pass6 ? " (PASS)" : " (FAIL)"), pass6 ? Color.BLUE : Color.RED);
+
+        // ch7: maps 正常/原始视图
+        String normMaps = KillerApplication.probeMaps(false);
+        String rawMaps = KillerApplication.probeMaps(true);
+        int normSens = countSensitiveWords(normMaps);
+        int rawSens = countSensitiveWords(rawMaps);
+        long normApkIno = extractMapsApkInode(normMaps, apkPath);
+        long rawApkIno = extractMapsApkInode(rawMaps, apkPath);
+        long originIno = -1;
+        if (repPath != null) {
+            String repStat = KillerApplication.probeStat(repPath);
+            originIno = extractIno(repStat, 0);
+        }
+        boolean pass7 = normSens == 0 && normApkIno == originIno && normApkIno > 0;
+        appendProbe(sb, "ch7 maps: ",
+                "norm_sens=" + normSens + " raw_sens=" + rawSens
+                        + " inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
+                        + (pass7 ? " (PASS)" : " (CHECK)"),
+                pass7 ? Color.BLUE : Color.RED);
+
+        // ch8: fd 扫描（信息性）
+        String fds = KillerApplication.probeFds();
+        appendProbe(sb, "ch8 fds: ", fds.replace("\n", " | "), Color.GRAY);
+
+        // ch9: dl_iterate 正常/原始视图
+        String normDl = KillerApplication.probeDlIterate(false);
+        String rawDl = KillerApplication.probeDlIterate(true);
+        int normDlSens = countSensitiveWords(normDl);
+        int rawDlSens = countSensitiveWords(rawDl);
+        boolean pass9 = normDlSens == 0;
+        appendProbe(sb, "ch9 dl_iterate: ",
+                "norm_sens=" + normDlSens + " raw_sens=" + rawDlSens + (pass9 ? " (PASS)" : " (FAIL)"),
+                pass9 ? Color.BLUE : Color.RED);
     }
 
     public static class App extends Application {

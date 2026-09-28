@@ -277,20 +277,26 @@ public class MainActivity extends Activity {
         int rawSens = countSensitiveWords(rawMaps);
         long normApkIno = extractMapsApkInode(normMaps, apkPath);
         long rawApkIno = extractMapsApkInode(rawMaps, apkPath);
-        boolean mapsEqual = normMaps != null && normMaps.equals(rawMaps);
+        boolean dimensionSame = normApkIno == rawApkIno && normSens == rawSens;
         boolean hasOrigin = repPath != null && new File(repPath).exists();
         long originIno = -1;
         if (hasOrigin) {
             String repStat = NativeDetector.probeStat(repPath);
             originIno = extractIno(repStat, 0);
         }
-        boolean pass7 = normApkIno > 0
-                && (mapsEqual ? (normApkIno == rawApkIno) : (normApkIno == originIno && normSens == 0));
-        String ch7Mark = mapsEqual ? "PASS" : (pass7 ? "HOOKED" : "CHECK");
-        int ch7Color = (pass7 || mapsEqual) ? Color.BLUE : Color.RED;
+        boolean pass7;
+        String ch7Mark;
+        if (hasOrigin) {
+            pass7 = normApkIno > 0 && normApkIno == originIno && normSens == 0;
+            ch7Mark = pass7 ? "HOOKED" : "CHECK";
+        } else {
+            pass7 = dimensionSame;
+            ch7Mark = pass7 ? "PASS" : "CHECK";
+        }
+        int ch7Color = pass7 ? Color.BLUE : Color.RED;
         String ch7line = "norm_sens=" + normSens + " raw_sens=" + rawSens
                 + " inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
-                + " norm==raw:" + mapsEqual + " (" + ch7Mark + ")";
+                + " dim_same:" + dimensionSame + " (" + ch7Mark + ")";
         appendProbe(sb, "ch7 maps: ", ch7line, ch7Color);
 
         String fds = NativeDetector.probeFds();

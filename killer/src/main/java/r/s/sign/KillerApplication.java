@@ -127,6 +127,12 @@ public class KillerApplication extends Application {
         }
     }
 
+    public static String repPath() {
+        String pkg = "r.s.sign";
+        File f = new File(getDataFile(pkg), "origin.apk");
+        return f.exists() ? f.getAbsolutePath() : null;
+    }
+
     private static void killOpen(String packageName) {
         try {
             System.loadLibrary("SignedByRS");

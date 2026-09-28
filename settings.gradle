@@ -14,4 +14,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "ApkSignatureKillerEx"
 include ':app'
-include ':killer'

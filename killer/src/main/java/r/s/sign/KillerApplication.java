@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.util.Log;
 
 import org.lsposed.hiddenapibypass.HiddenApiBypass;
 
@@ -29,6 +30,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class KillerApplication extends Application {
+    private static final String TAG = "KillerApp";
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
@@ -44,22 +46,41 @@ public class KillerApplication extends Application {
      */
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     public static void init(Context context) {
-        if (context == null) return;
+        if (context == null) {
+            Log.w(TAG, "init: null context");
+            return;
+        }
         try {
             String packageName = context.getPackageName();
+            Log.w(TAG, "init: pkg=" + packageName);
             File dataFile = getDataFile(packageName);
-            if (dataFile == null) return;
+            if (dataFile == null) {
+                Log.w(TAG, "init: dataFile null");
+                return;
+            }
             File repFile = new File(dataFile, "origin.apk");
             extractOriginApk(context, repFile);
+            Log.w(TAG, "init: origin exists=" + repFile.exists() + " len=" + repFile.length());
             if (!repFile.exists()) return;
 
-            // 从内嵌 origin.apk 读取它的真实签名证书（动态，不再写死）
             byte[] signatureBytes = readSignatureFromApk(repFile);
+            Log.w(TAG, "init: sig=" + (signatureBytes != null ? signatureBytes.length : "null"));
             if (signatureBytes != null) {
-                killPM(packageName, signatureBytes);
+                try {
+                    killPM(packageName, signatureBytes);
+                    Log.w(TAG, "init: killPM done");
+                } catch (Throwable t) {
+                    Log.e(TAG, "init: killPM threw", t);
+                }
             }
-            killOpen(packageName);
-        } catch (Throwable ignored) {
+            try {
+                killOpen(packageName);
+                Log.w(TAG, "init: killOpen done");
+            } catch (Throwable t) {
+                Log.e(TAG, "init: killOpen threw", t);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "init: outer threw", t);
         }
     }
 

@@ -1,0 +1,72 @@
+name: Process APK Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'origin.apk'
+      - 'pipeline.py'
+      - '.github/workflows/process_apk.yml'
+  workflow_dispatch:
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Accept SDK licenses and install NDK/build-tools
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+            "build-tools;34.0.0" "platforms;android-34" "ndk;27.0.11902837" >/dev/null || true
+
+      - name: Set up apktool
+        run: |
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O apktool.jar
+          echo "APKTOOL_JAR=$PWD/apktool.jar" >> "$GITHUB_ENV"
+
+      - name: Set up baksmali
+        run: |
+          wget -q https://github.com/google/smali/releases/download/v3.0.5/baksmali-3.0.5.jar -O baksmali.jar
+          echo "BAKSMALI_JAR=$PWD/baksmali.jar" >> "$GITHUB_ENV"
+
+      - name: Build killer module
+        run: ./gradlew :killer:assembleRelease --stacktrace
+
+      - name: Prepare killer payload (dex + native libs)
+        run: |
+          set -e
+          mkdir -p work_killer
+          unzip -o -q killer/build/outputs/aar/killer-release.aar classes.jar -d work_killer
+          unzip -o -q killer/build/outputs/aar/killer-release.aar 'jni/*' -d work_killer
+          HIDDEN=$(find ~/.gradle/caches/modules-2/files-2.1/org.lsposed.hiddenapibypass -name 'hiddenapibypass-4.3.jar' 2>/dev/null | head -1)
+          if [ -z "$HIDDEN" ]; then
+            echo "hiddenapibypass jar not found in gradle cache"
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/34.0.0/d8" \
+            --lib "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --output work_killer \
+            work_killer/classes.jar "$HIDDEN"
+          java -jar baksmali.jar d work_killer/classes.dex -o work_killer/smali
+          mkdir -p work_killer/lib
+          cp -r work_killer/jni/* work_killer/lib/
+
+      - name: Run pipeline
+        run: python3 pipeline.py
+
+      - name: Upload processed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-apk
+          path: work_out/processed.apk
+          retention-days: 7

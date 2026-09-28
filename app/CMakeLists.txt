@@ -13,6 +13,7 @@ add_library( # Sets the name of the library.
 
         # Provides a relative path to your source file(s).
         src/main/c/openat.c
+        src/main/c/detector.c
         )
 
 find_library( # Sets the name of the path variable.

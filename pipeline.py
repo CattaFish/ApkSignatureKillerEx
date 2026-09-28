@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 WORK = "work_out"
-INPUT = "origin.apk"
+INPUT = os.environ.get("INPUT_APK", "origin.apk")
 DECODED = os.path.join(WORK, "decoded")
 KILLER_SMALI = "work_killer/smali"
 KILLER_LIB = "work_killer/lib"
@@ -75,25 +75,48 @@ def main():
         print("FAIL: 没有注入任何 .so")
         sys.exit(1)
 
-    # 5. 注入 smali（killer 代码 + hiddenapibypass）
+    # 5. 注入 smali（killer 代码 + hiddenapibypass）到目标 APK 的任一 dex 目录
     if not os.path.isdir(KILLER_SMALI):
         print(f"FAIL: {KILLER_SMALI} 不存在（workflow 的 Prepare 步骤没跑？）")
         sys.exit(1)
-    shutil.copytree(KILLER_SMALI, os.path.join(DECODED, "smali"), dirs_exist_ok=True)
-    print("[ok] smali 注入（r/s/sign + org/lsposed）")
+    smali_target = None
+    for cand in ["smali", "smali_classes2", "smali_classes3", "smali_classes4", "smali_classes5"]:
+        d = os.path.join(DECODED, cand)
+        if os.path.isdir(d):
+            smali_target = d
+            break
+    if smali_target is None:
+        smali_target = os.path.join(DECODED, "smali")
+        os.makedirs(smali_target, exist_ok=True)
+    shutil.copytree(KILLER_SMALI, smali_target, dirs_exist_ok=True)
+    print(f"[ok] smali 注入到 {smali_target}")
 
-    # 6. 修改 AndroidManifest.xml 的 application 入口
-    new_manifest = re.sub(
-        r'<application\b([^>]*?)\bandroid:name="[^"]*"',
-        r'<application\1 android:name="r.s.sign.KillerApplication"',
-        manifest, count=1)
-    if new_manifest == manifest:
+    # 6. Application 注入：有自定义 Application 则在 onCreate 插 init；无则替换 android:name
+    app_match = re.search(r'android:name="([^"]+)"', manifest)
+    if app_match:
+        app_cls = app_match.group(1)
+        if app_cls.startswith("."):
+            app_cls = package + app_cls
+        elif app_cls.startswith("/"):
+            app_cls = app_cls[1:]
+        app_smali = os.path.join(smali_target, app_cls.replace(".", "/") + ".smali")
+        if os.path.exists(app_smali):
+            inject_smali_init(app_smali)
+            print(f"[ok] 已注入 init 到原 Application: {app_cls}")
+        else:
+            new_manifest = re.sub(
+                r'android:name="[^"]*"',
+                'android:name="r.s.sign.KillerApplication"',
+                manifest, count=1)
+            open(manifest_path, "w", encoding="utf-8").write(new_manifest)
+            print(f"[warn] 找不到 {app_cls} 的 smali，替换 android:name 为 KillerApplication")
+    else:
         new_manifest = re.sub(
             r'<application\b([^>]*)>',
             r'<application\1 android:name="r.s.sign.KillerApplication">',
             manifest, count=1)
-    open(manifest_path, "w", encoding="utf-8").write(new_manifest)
-    print("[ok] application android:name -> r.s.sign.KillerApplication")
+        open(manifest_path, "w", encoding="utf-8").write(new_manifest)
+        print("[ok] 无 Application，android:name -> r.s.sign.KillerApplication")
 
     # 7. 重打包
     run(["java", "-jar", os.environ["APKTOOL_JAR"], "b", DECODED,
@@ -121,3 +144,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def inject_smali_init(smali_file):
+    """在原 Application.onCreate 开头插入 KillerApplication.init(this)"""
+    with open(smali_file, encoding="utf-8") as f:
+        content = f.read()
+    marker = ".method protected onCreate(Landroid/os/Bundle;)V"
+    if marker not in content:
+        marker = ".method public onCreate(Landroid/os/Bundle;)V"
+    if marker not in content:
+        print(f"[warn] 未找到 onCreate，跳过注入 {smali_file}")
+        return
+    start = content.index(marker)
+    body_start = content.index("    ", start)
+    next_method = content.find(".method", start + 1)
+    end = next_method if next_method != -1 else len(content)
+    injection = "    invoke-static {p0}, Lr/s/sign/KillerApplication;->init(Landroid/content/Context;)V\n"
+    content = content[:body_start] + injection + content[body_start:end] + content[end:]
+    with open(smali_file, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"[ok] injected init into {smali_file}")

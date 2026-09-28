@@ -9,6 +9,11 @@ on:
       - '.github/workflows/process_apk.yml'
       - 'killer/**'
   workflow_dispatch:
+    inputs:
+      apk:
+        description: 'APK 文件（拖入即可，自动修补并签名）'
+        required: true
+        type: file
 
 jobs:
   process:
@@ -67,8 +72,25 @@ jobs:
           mkdir -p work_killer/lib
           cp -r work_killer/jni/* work_killer/lib/
 
+      - name: Resolve input APK
+        id: input
+        run: |
+          set -e
+          if [ -n "${{ github.event.inputs.apk }}" ]; then
+            RAW="${{ github.event.inputs.apk }}"
+            APK_PATH="${RAW#*=}"
+            echo "dispatch input: $APK_PATH"
+            cp "$APK_PATH" input.apk
+          else
+            cp origin.apk input.apk
+          fi
+          echo "INPUT_APK=$PWD/input.apk" >> "$GITHUB_ENV"
+          ls -l input.apk
+
       - name: Run pipeline
         run: python3 pipeline.py
+        env:
+          INPUT_APK: "${{ env.INPUT_APK }}"
 
       - name: Upload processed APK
         uses: actions/upload-artifact@v4

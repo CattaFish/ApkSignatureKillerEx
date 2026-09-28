@@ -58,6 +58,26 @@ const char *sigb_resolve(const char *path) {
     return path;
 }
 
+/* 快速路径：无锁判断是否需要走慢路径（重定向/sanitize）。
+   返回 0 = 确定无关，直接走原始系统调用；返回 1 = 可能相关，需进慢路径。 */
+int sigb_maybe_relevant(const char *path) {
+    if (path == NULL) return 0;
+    /* 1) /proc/self/maps 或 smaps：需 sanitize */
+    if (strncmp(path, "/proc/self/", 11) == 0 || strncmp(path, "/proc/thread-self/", 18) == 0) {
+        if (strstr(path, "maps") != NULL || strstr(path, "smaps") != NULL) {
+            return 1;
+        }
+        return 0;
+    }
+    /* 2) 绝对路径 && 以 /data/ 开头：可能命中 APK 路径 */
+    if (path[0] == '/' && strncmp(path, "/data/", 6) == 0) {
+        return 1;
+    }
+    /* 3) 其他：无关 */
+    return 0;
+}
+
+
 void sigb_set_state(int state) {
     g_state = state;
 }

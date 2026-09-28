@@ -67,6 +67,10 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
 
 int (*old_open)(const char *, int, mode_t);
 static int openImpl(const char *pathname, int flags, mode_t mode) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old_open(pathname, flags, mode);
+    }
+
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -74,15 +78,18 @@ static int openImpl(const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_INFO("REDIRECT open %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT open %s -> %s", pathname, sigb_get_rep_path());
         return old_open(sigb_get_rep_path(), flags, mode);
     }
-    XH_LOG_INFO("PASS open %s", pathname);
-    return old_open(pathname, flags, mode);
+        return old_open(pathname, flags, mode);
 }
 
 int (*old_open64)(const char *, int, mode_t);
 static int open64Impl(const char *pathname, int flags, mode_t mode) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old_open64(pathname, flags, mode);
+    }
+
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -90,15 +97,18 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_INFO("REDIRECT open64 %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT open64 %s -> %s", pathname, sigb_get_rep_path());
         return old_open64(sigb_get_rep_path(), flags, mode);
     }
-    XH_LOG_INFO("PASS open64 %s", pathname);
-    return old_open64(pathname, flags, mode);
+        return old_open64(pathname, flags, mode);
 }
 
 int (*old_openat)(int, const char*, int, mode_t);
 static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old_openat(fd, pathname, flags, mode);
+    }
+
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -106,15 +116,18 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_INFO("REDIRECT openat %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT openat %s -> %s", pathname, sigb_get_rep_path());
         return old_openat(fd, sigb_get_rep_path(), flags, mode);
     }
-    XH_LOG_INFO("PASS openat %s", pathname);
-    return old_openat(fd, pathname, flags, mode);
+        return old_openat(fd, pathname, flags, mode);
 }
 
 int (*old_openat64)(int, const char*, int, mode_t);
 static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old_openat64(fd, pathname, flags, mode);
+    }
+
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -122,11 +135,10 @@ static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_INFO("REDIRECT openat64 %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT openat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_openat64(fd, sigb_get_rep_path(), flags, mode);
     }
-    XH_LOG_INFO("PASS openat64 %s", pathname);
-    return old_openat64(fd, pathname, flags, mode);
+        return old_openat64(fd, pathname, flags, mode);
 }
 
 JNIEXPORT void JNICALL
@@ -170,7 +182,7 @@ static int accessImpl(const char *pathname, int mode) {
         return -1;
     }
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT access %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT access %s -> %s", pathname, sigb_get_rep_path());
         return old_access(sigb_get_rep_path(), mode);
     }
     return old_access(pathname, mode);
@@ -178,7 +190,7 @@ static int accessImpl(const char *pathname, int mode) {
 
 static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT readlink %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT readlink %s -> %s", pathname, sigb_get_rep_path());
         return old_readlink(sigb_get_rep_path(), buf, bufsiz);
     }
     return old_readlink(pathname, buf, bufsiz);
@@ -186,7 +198,7 @@ static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz) {
 
 static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT readlinkat %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT readlinkat %s -> %s", pathname, sigb_get_rep_path());
         return old_readlinkat(dirfd, sigb_get_rep_path(), buf, bufsiz);
     }
     return old_readlinkat(dirfd, pathname, buf, bufsiz);
@@ -194,7 +206,7 @@ static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t
 
 static char *realpathImpl(const char *pathname, char *resolved_path) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT realpath %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT realpath %s -> %s", pathname, sigb_get_rep_path());
         return old_realpath(sigb_get_rep_path(), resolved_path);
     }
     return old_realpath(pathname, resolved_path);
@@ -204,7 +216,7 @@ static char *realpathImpl(const char *pathname, char *resolved_path) {
 
 static int statImpl(const char *pathname, struct stat *st) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT stat %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT stat %s -> %s", pathname, sigb_get_rep_path());
         return old_stat(sigb_get_rep_path(), st);
     }
     return old_stat(pathname, st);
@@ -212,7 +224,7 @@ static int statImpl(const char *pathname, struct stat *st) {
 
 static int lstatImpl(const char *pathname, struct stat *st) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT lstat %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT lstat %s -> %s", pathname, sigb_get_rep_path());
         return old_lstat(sigb_get_rep_path(), st);
     }
     return old_lstat(pathname, st);
@@ -220,7 +232,7 @@ static int lstatImpl(const char *pathname, struct stat *st) {
 
 static int stat64Impl(const char *pathname, struct stat64 *st) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT stat64 %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT stat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_stat64(sigb_get_rep_path(), st);
     }
     return old_stat64(pathname, st);
@@ -228,7 +240,7 @@ static int stat64Impl(const char *pathname, struct stat64 *st) {
 
 static int lstat64Impl(const char *pathname, struct stat64 *st) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT lstat64 %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT lstat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_lstat64(sigb_get_rep_path(), st);
     }
     return old_lstat64(pathname, st);
@@ -236,7 +248,7 @@ static int lstat64Impl(const char *pathname, struct stat64 *st) {
 
 static int statfsImpl(const char *pathname, struct statfs *st) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT statfs %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT statfs %s -> %s", pathname, sigb_get_rep_path());
         return old_statfs(sigb_get_rep_path(), st);
     }
     return old_statfs(pathname, st);
@@ -244,7 +256,7 @@ static int statfsImpl(const char *pathname, struct statfs *st) {
 
 static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx) {
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT statx %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT statx %s -> %s", pathname, sigb_get_rep_path());
         return old_statx(dirfd, sigb_get_rep_path(), flags, mask, stx);
     }
     return old_statx(dirfd, pathname, flags, mask, stx);
@@ -253,6 +265,10 @@ static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int ma
 /* ================= Step 6: implementations ================= */
 
 static FILE *fopenImpl(const char *pathname, const char *mode) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old_fopen(pathname, mode);
+    }
+
     if (mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -268,13 +284,17 @@ static FILE *fopenImpl(const char *pathname, const char *mode) {
         read_only = 1;
     }
     if (read_only && sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT fopen %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT fopen %s -> %s", pathname, sigb_get_rep_path());
         return old_fopen(sigb_get_rep_path(), mode);
     }
     return old_fopen(pathname, mode);
 }
 
 static int __open_2Impl(const char *pathname, int flags) {
+    if (!sigb_maybe_relevant(pathname)) {
+        return old___open_2(pathname, flags);
+    }
+
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -282,7 +302,7 @@ static int __open_2Impl(const char *pathname, int flags) {
         }
     }
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_INFO("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
+        XH_LOG_WARN("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
         return old___open_2(sigb_get_rep_path(), flags);
     }
     return old___open_2(pathname, flags);
@@ -311,7 +331,7 @@ static int serve_sanitized_proc(const char *pathname) {
     free(clean);
     if (memfd < 0) return -1;
 
-    XH_LOG_INFO("SANITIZED %s -> memfd:npatch_proc_view", pathname);
+    XH_LOG_WARN("SANITIZED %s -> memfd:npatch_proc_view", pathname);
     return memfd;
 }
 

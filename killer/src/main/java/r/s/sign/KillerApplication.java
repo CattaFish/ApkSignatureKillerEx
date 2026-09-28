@@ -220,7 +220,7 @@ public class KillerApplication extends Application {
 
     public static native void refreshHooks();
 
-    public static native String probeFopen(String path);
+    public static native byte[] probeFopen(String path);
 
     public static native String probeStat(String path);
 
@@ -231,6 +231,6 @@ public class KillerApplication extends Application {
 
     public static native String probeFds();
 
-    public static native String probeDlIterate();
+    public static native String probeDlIterate(boolean raw);
 }
 

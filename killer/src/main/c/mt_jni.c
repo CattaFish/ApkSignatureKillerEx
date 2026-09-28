@@ -14,6 +14,7 @@
 #include <sys/vfs.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "xhook.h"
 #include "xh_log.h"
 #include "sigbypass_core.h"
@@ -371,36 +372,37 @@ Java_r_s_sign_KillerApplication_refreshHooks(JNIEnv *env, jclass clazz) {
     sigb_set_state(SIGB_STATE_NORMAL);
 }
 
-JNIEXPORT jstring JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_r_s_sign_KillerApplication_probeFopen(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
-    if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
+    if (jpath == NULL) return NULL;
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
-    if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
+    if (path == NULL) return NULL;
     FILE *fp = fopen(path, "r");
     (*env)->ReleaseStringUTFChars(env, jpath, path);
-    if (fp == NULL) return (*env)->NewStringUTF(env, "ERR:fopen");
-    char *buf = (char *)malloc(4096);
-    if (buf == NULL) { fclose(fp); return (*env)->NewStringUTF(env, "ERR:oom"); }
-    size_t cap = 4096, len = 0;
+    if (fp == NULL) return NULL;
+    size_t cap = 65536, len = 0;
+    char *buf = (char *)malloc(cap);
+    if (buf == NULL) { fclose(fp); return NULL; }
     while (1) {
         size_t rd = fread(buf + len, 1, cap - len - 1, fp);
         len += rd;
         if (rd == 0) break;
-        if (len + 512 >= cap) {
+        if (len + 65536 >= cap) {
             cap *= 2;
             char *grown = (char *)realloc(buf, cap);
-            if (grown == NULL) { free(buf); fclose(fp); return (*env)->NewStringUTF(env, "ERR:oom"); }
+            if (grown == NULL) { free(buf); fclose(fp); return NULL; }
             buf = grown;
         }
     }
     fclose(fp);
-    buf[len] = '\0';
-    jstring out = (*env)->NewStringUTF(env, buf);
+    jbyteArray out = (*env)->NewByteArray(env, (jsize)len);
+    if (out != NULL) {
+        (*env)->SetByteArrayRegion(env, out, 0, (jsize)len, (const jbyte *)buf);
+    }
     free(buf);
     return out;
 }
-
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
@@ -442,26 +444,19 @@ Java_r_s_sign_KillerApplication_probePaths(JNIEnv *env, jclass clazz, jstring jp
     if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     if (path == NULL) return (*env)->NewStringUTF(env, "ERR:oom");
-    char out[1024];
+    char out[2048];
     int ok = (access(path, F_OK) == 0);
     char *linkbuf = sigb_raw_readlink(path);
-    char *realbuf = sigb_raw_readlink(path);
-    char real[512] = "?";
-    if (realbuf == NULL) {
-        snprintf(real, sizeof(real), "ERR:readlink errno=%d", errno);
-    } else {
-        snprintf(real, sizeof(real), "%s", realbuf);
-    }
-    snprintf(out, sizeof(out), "access=%s readlink=%s realpath=%s",
+    char *realbuf = realpath(path, NULL);
+    snprintf(out, sizeof(out), "access=%s raw_readlink=%s normal_realpath=%s",
              ok ? "OK" : "NO",
              linkbuf != NULL ? linkbuf : "?",
-             real);
+             realbuf != NULL ? realbuf : "ERR:realpath");
     free(linkbuf);
     free(realbuf);
     (*env)->ReleaseStringUTFChars(env, jpath, path);
     return (*env)->NewStringUTF(env, out);
 }
-
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean raw) {
     (void)clazz;
@@ -509,12 +504,16 @@ Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz) {
+Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz, jboolean raw) {
     (void)clazz;
     size_t used = 0;
     probe_dl_out[0] = '\0';
-    sigb_set_state(SIGB_STATE_PROBE);
+    if (raw == JNI_TRUE) {
+        sigb_set_state(SIGB_STATE_PROBE);
+    }
     dl_iterate_phdr(probe_dlcallback, &used);
-    sigb_set_state(SIGB_STATE_NORMAL);
+    if (raw == JNI_TRUE) {
+        sigb_set_state(SIGB_STATE_NORMAL);
+    }
     return (*env)->NewStringUTF(env, probe_dl_out);
 }

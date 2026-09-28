@@ -49,5 +49,4 @@ android {
 }
 
 dependencies {
-    implementation project(path: ':killer')
 }

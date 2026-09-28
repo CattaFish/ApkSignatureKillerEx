@@ -48,15 +48,11 @@ jobs:
           mkdir -p work_killer
           unzip -o -q killer/build/outputs/aar/killer-release.aar classes.jar -d work_killer
           unzip -o -q killer/build/outputs/aar/killer-release.aar 'jni/*' -d work_killer
-          HIDDEN=$(find ~/.gradle/caches/modules-2/files-2.1/org.lsposed.hiddenapibypass -name 'hiddenapibypass-4.3.jar' 2>/dev/null | head -1)
-          if [ -z "$HIDDEN" ]; then
-            echo "hiddenapibypass jar not found in gradle cache"
-            exit 1
-          fi
+          wget -q https://repo1.maven.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/4.3/hiddenapibypass-4.3.jar -O work_killer/hiddenapibypass.jar
           "$ANDROID_HOME/build-tools/34.0.0/d8" \
             --lib "$ANDROID_HOME/platforms/android-34/android.jar" \
             --output work_killer \
-            work_killer/classes.jar "$HIDDEN"
+            work_killer/classes.jar work_killer/hiddenapibypass.jar
           java -jar baksmali.jar d work_killer/classes.dex -o work_killer/smali
           mkdir -p work_killer/lib
           cp -r work_killer/jni/* work_killer/lib/

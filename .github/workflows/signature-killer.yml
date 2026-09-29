@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: '输入 APK 直链 URL（必填）'
-        required: true
+        description: '输入 APK 直链 URL（仅 workflow_dispatch 使用；push 触发时自动跳过处理）'
+        required: false
         type: string
 
 jobs:
@@ -73,20 +73,31 @@ jobs:
           ls -l work_killer work_killer/lib/*/
 
       - name: Download input APK
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.apk_url != ''
         working-directory: signature-killer
         run: |
           curl -fL --retry 3 -sS -o input.apk "${{ github.event.inputs.apk_url }}"
           ls -l input.apk
 
       - name: Run pipeline
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.apk_url != ''
         working-directory: signature-killer
         env:
           APKTOOL_JAR: "${{ env.APKTOOL_JAR }}"
         run: python3 process_apk.py --apk input.apk
 
       - name: Upload processed APK
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.apk_url != ''
         uses: actions/upload-artifact@v4
         with:
           name: processed-apk
           path: signature-killer/work_out/processed_*.apk
+          retention-days: 14
+
+      - name: Upload killer AAR
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: killer-aar
+          path: signature-killer/killer/build/outputs/aar/*.aar
           retention-days: 14

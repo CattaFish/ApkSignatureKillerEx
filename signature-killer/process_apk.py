@@ -212,12 +212,18 @@ def main():
         '            android:exported="false" />'
     )
     new_manifest = re.sub(
-        r'(<application\b[^>]*?)(>)',
-        lambda mo: mo.group(1) + '\n        ' + provider + mo.group(2),
+        r'(<application\b[^>]*>)',
+        lambda mo: mo.group(1) + '\n        ' + provider,
         manifest, count=1, flags=re.S)
     if new_manifest == manifest:
         print("[warn] 未找到 <application> 标签，KillerProvider 注入失败")
     else:
+        try:
+            import xml.etree.ElementTree as ET
+            ET.fromstring(new_manifest)
+        except Exception as e:
+            print(f"FAIL: 注入后的 AndroidManifest.xml 非法: {e}")
+            sys.exit(1)
         open(manifest_path, "w", encoding="utf-8").write(new_manifest)
         print(f"[ok] KillerProvider 已注入 (authorities={package}.killerprovider)")
 

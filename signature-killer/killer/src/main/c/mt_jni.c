@@ -61,7 +61,10 @@ static void *(*old_android_dlopen_ext)(const char *, int, const void *);
 
 static void sigb_refresh_after_load(void) {
     sigb_set_state(SIGB_STATE_REENTRY);
-    xhook_refresh(1);
+    /* 同步刷新：新 .so 加载后立即 hook，避免目标 app 紧接着调用检测函数时
+       hook 尚未就绪（异步会引入竞态）。xhook_refresh 内部不调用 dlopen，
+       不会与加载线程持有的 linker 锁形成死锁。 */
+    xhook_refresh(0);
     sigb_set_state(SIGB_STATE_NORMAL);
 }
 

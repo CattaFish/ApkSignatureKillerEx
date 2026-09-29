@@ -177,11 +177,9 @@ public class MainActivity extends Activity {
     private static final Pattern RE_MAP_INO = Pattern.compile("^[0-9a-f]+-[0-9a-f]+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+");
     private static final Pattern RE_MAP_SO = Pattern.compile("\\s(/[^\\s]+\\.so)(?: \\(deleted\\))?$");
 
-    private String findRepPath() {
-        String[] candidates = {"/data/user/0/r.s.sign/origin.apk", "/data/data/r.s.sign/origin.apk"};
-        for (String c : candidates) {
-            if (new File(c).exists()) return c;
-        }
+        private String findRepPath() {
+        File f = new File(getApplicationInfo().dataDir, "signed.apk");
+        if (f.exists()) return f.getAbsolutePath();
         return null;
     }
 

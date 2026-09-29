@@ -58,7 +58,7 @@ public class KillerApplication extends Application {
                 Log.w(TAG, "init: dataFile null");
                 return;
             }
-            File repFile = new File(dataFile, "origin.apk");
+            File repFile = new File(dataFile, "signed.apk");
             extractOriginApk(context, repFile);
             Log.w(TAG, "init: origin exists=" + repFile.exists() + " len=" + repFile.length());
             if (!repFile.exists()) return;
@@ -87,7 +87,7 @@ public class KillerApplication extends Application {
     private static void extractOriginApk(Context context, File repFile) {
         try {
             if (repFile.exists() && repFile.length() > 0) return;
-            InputStream is = context.getAssets().open("SignedByRS/origin.apk");
+            InputStream is = context.getAssets().open("SignedByRS/input.apk");
             if (is == null) return;
             File parent = repFile.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
@@ -210,7 +210,7 @@ public class KillerApplication extends Application {
             System.err.println("Get apk path failed");
             return;
         }
-        File repFile = new File(getDataFile(packageName), "origin.apk");
+        File repFile = new File(getDataFile(packageName), "signed.apk");
         if (!repFile.exists()) {
             System.err.println("origin.apk not found");
             return;

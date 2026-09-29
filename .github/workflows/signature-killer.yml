@@ -5,11 +5,17 @@ on:
     branches: [ "main", "master" ]
     paths:
       - 'signature-killer/**'
+      - 'process_apk.py'
       - '.github/workflows/signature-killer.yml'
   workflow_dispatch:
+    inputs:
+      apk_url:
+        description: '输入 APK 直链 URL（必填）'
+        required: true
+        type: string
 
 jobs:
-  build:
+  process:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,18 +27,66 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Accept licenses and install NDK
+      - name: Accept licenses and install SDK components
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.11902837" "platforms;android-34" "build-tools;34.0.0" >/dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+            "build-tools;34.0.0" "platforms;android-34" "ndk;27.0.11902837" >/dev/null || true
 
-      - name: Build killer AAR
+      - name: Set up apktool
+        run: |
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O apktool.jar
+          echo "APKTOOL_JAR=$PWD/apktool.jar" >> "$GITHUB_ENV"
+
+      - name: Set up baksmali
+        run: |
+          wget -q https://github.com/baksmali/smali/releases/download/3.0.10/baksmali-3.0.10-fat.jar -O baksmali.jar
+
+      - name: Build killer module
         working-directory: signature-killer
         run: ./gradlew :killer:assembleRelease --stacktrace
 
-      - name: Upload AAR
+      - name: Prepare killer payload
+        working-directory: signature-killer
+        run: |
+          set -e
+          mkdir -p work_killer
+          unzip -o -q killer/build/outputs/aar/killer-release.aar classes.jar -d work_killer
+          unzip -o -q killer/build/outputs/aar/killer-release.aar 'jni/*' -d work_killer
+          HIDDEN=$(find ~/.gradle/caches/modules-2/files-2.1/org.lsposed.hiddenapibypass -name '*.jar' 2>/dev/null | head -1)
+          if [ -z "$HIDDEN" ]; then
+            echo "hiddenapibypass not in gradle cache, downloading AAR 6.1..."
+            mkdir -p work_killer/hiddenapibypass
+            curl -fL --retry 3 -sS -o work_killer/hiddenapibypass.aar \
+              https://repo.maven.apache.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/6.1/hiddenapibypass-6.1.aar
+            unzip -o -q work_killer/hiddenapibypass.aar classes.jar -d work_killer/hiddenapibypass
+            HIDDEN=work_killer/hiddenapibypass/classes.jar
+          fi
+          echo "HIDDEN_JAR=$HIDDEN"
+          "$ANDROID_HOME/build-tools/34.0.0/d8" \
+            --lib "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --output work_killer \
+            work_killer/classes.jar "$HIDDEN"
+          java -jar ../baksmali.jar d work_killer/classes.dex -o work_killer/smali
+          mkdir -p work_killer/lib
+          cp -r work_killer/jni/* work_killer/lib/
+          ls -l work_killer work_killer/lib/*/
+
+      - name: Download input APK
+        working-directory: signature-killer
+        run: |
+          curl -fL --retry 3 -sS -o input.apk "${{ github.event.inputs.apk_url }}"
+          ls -l input.apk
+
+      - name: Run pipeline
+        working-directory: signature-killer
+        env:
+          APKTOOL_JAR: "${{ env.APKTOOL_JAR }}"
+        run: python3 process_apk.py --apk input.apk
+
+      - name: Upload processed APK
         uses: actions/upload-artifact@v4
         with:
-          name: killer-aar
-          path: signature-killer/killer/build/outputs/aar/*.aar
+          name: processed-apk
+          path: signature-killer/work_out/processed_*.apk
           retention-days: 14

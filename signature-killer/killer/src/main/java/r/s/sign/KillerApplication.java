@@ -252,18 +252,6 @@ public class KillerApplication extends Application {
     }
 
 
-    private static void skipFully(DataInputStream in, int n) throws IOException {
-        long skipped = 0;
-        while (skipped < n) {
-            long s = in.skip((long) n - skipped);
-            if (s <= 0) {
-                if (in.read() == -1) throw new IOException("EOF");
-                skipped++;
-            } else {
-                skipped += s;
-            }
-        }
-    }
 
     private static void killPM(String packageName, byte[] signatureBytes) {
         Signature fakeSignature = new Signature(signatureBytes);

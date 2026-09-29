@@ -247,11 +247,10 @@ public class MainActivity extends Activity {
     private byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
-            int signerCount = readLEInt(dis);
-            if (signerCount <= 0 || signerCount > 16) return null;
-            while (signerCount-- > 0) {
+            // v2/v3 block value = 长度前缀的 signer 序列（无 count 字段）
+            while (dis.available() > 0) {
                 int signerLen = readLEInt(dis);
-                if (signerLen <= 0 || signerLen > len - 4) return null;
+                if (signerLen <= 0 || signerLen > dis.available()) break;
                 byte[] signer = new byte[signerLen];
                 dis.readFully(signer);
                 byte[] der = extractCertFromSigner(signer);
@@ -263,6 +262,7 @@ public class MainActivity extends Activity {
         }
         return null;
     }
+
 
     private byte[] extractCertFromSigner(byte[] signer) {
         try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);

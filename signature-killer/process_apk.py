@@ -130,11 +130,10 @@ def get_apk_signature_md5(apk_path):
             if pair_id in (0x7109871a, 0xf05368c0):
                 value = data[off:off + pair_len - 4]
                 try:
-                    signer_count = struct.unpack_from("<I", value, 0)[0]
-                    if signer_count <= 0 or signer_count > 16:
+                    signer_len = struct.unpack_from("<I", value, 0)[0]
+                    if signer_len <= 0 or signer_len > len(value) - 4:
                         return None
-                    signer_len = struct.unpack_from("<I", value, 4)[0]
-                    signer = value[8:8 + signer_len]
+                    signer = value[4:4 + signer_len]
                     signed_len = struct.unpack_from("<I", signer, 0)[0]
                     signed = signer[4:4 + signed_len]
                     digests_len = struct.unpack_from("<I", signed, 0)[0]

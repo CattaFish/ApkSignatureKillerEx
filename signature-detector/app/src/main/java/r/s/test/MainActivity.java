@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -235,7 +236,7 @@ public class MainActivity extends Activity {
         // 3) Signing Block footer
         long footerPos = cdOffset - 24;
         if (footerPos < 0 || footerPos + 24 > fileLen) { v2LastError = "bad footerPos"; return null; }
-        if (!"APK Sig Block 42".equals(new String(data, (int) footerPos + 8, 16, "US-ASCII"))) {
+        if (!"APK Sig Block 42".equals(new String(data, (int) footerPos + 8, 16, StandardCharsets.US_ASCII))) {
             v2LastError = "magic mismatch"; return null;
         }
         long blockSize = 0;

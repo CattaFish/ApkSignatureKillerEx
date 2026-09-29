@@ -73,10 +73,21 @@ static void *dlopenImpl(const char *filename, int flags) {
     return h;
 }
 
+/* android_dlopen_ext 是 Bionic 扩展，NDK 头文件不声明，用 dlsym 运行时解析 */
 static void *android_dlopen_extImpl(const char *filename, int flags, const void *extinfo) {
-    void *h = old_android_dlopen_ext != NULL
-              ? old_android_dlopen_ext(filename, flags, extinfo)
-              : android_dlopen_ext(filename, flags, extinfo);
+    static void *(*real_android_dlopen_ext)(const char *, int, const void *) = NULL;
+    if (real_android_dlopen_ext == NULL) {
+        real_android_dlopen_ext = (void *(*)(const char *, int, const void *))
+                dlsym(RTLD_DEFAULT, "android_dlopen_ext");
+    }
+    void *h;
+    if (old_android_dlopen_ext != NULL) {
+        h = old_android_dlopen_ext(filename, flags, extinfo);
+    } else if (real_android_dlopen_ext != NULL) {
+        h = real_android_dlopen_ext(filename, flags, extinfo);
+    } else {
+        h = dlopen(filename, flags);
+    }
     if (h != NULL) {
         sigb_refresh_after_load();
     }

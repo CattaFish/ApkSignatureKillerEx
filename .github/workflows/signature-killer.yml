@@ -94,6 +94,17 @@ jobs:
           path: signature-killer/work_out/processed_*.apk
           retention-days: 14
 
+      - name: Upload pipeline debug dump on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-debug
+          path: |
+            signature-killer/work_out/decoded
+            signature-killer/work_out/*.apk
+            signature-killer/*.apk
+          retention-days: 7
+
       - name: Upload killer AAR
         if: always()
         uses: actions/upload-artifact@v4

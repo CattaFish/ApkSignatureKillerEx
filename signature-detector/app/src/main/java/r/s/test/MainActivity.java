@@ -285,9 +285,15 @@ public class MainActivity extends Activity {
         boolean pass7;
         String ch7Mark;
         if (hasOrigin) {
-            // 路径族 stat 已重定向(normalIno==originIno) + maps 无敏感词 => HOOKED
-            pass7 = normalIno > 0 && normalIno == originIno && normSens == 0;
-            ch7Mark = pass7 ? "HOOKED" : "CHECK";
+            if (normalIno != rawIno) {
+                // stat 已被 hook：校验重定向目标 + maps 无敏感词
+                pass7 = normalIno > 0 && normalIno == originIno && normSens == 0;
+                ch7Mark = pass7 ? "HOOKED" : "CHECK";
+            } else {
+                // stat 未被 hook（纯净/未处理）：按维度一致判定，残留文件不参与
+                pass7 = dimensionSame;
+                ch7Mark = pass7 ? "PASS" : "CHECK";
+            }
         } else {
             pass7 = dimensionSame;
             ch7Mark = pass7 ? "PASS" : "CHECK";

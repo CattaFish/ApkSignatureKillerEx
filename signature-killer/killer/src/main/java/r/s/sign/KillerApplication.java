@@ -44,7 +44,7 @@ public class KillerApplication extends Application {
 
     /**
      * 通用入口：任意应用的 Application 可调用 KillerApplication.init(this)。
-     * 包名、签名数据全部运行时从 origin.apk 动态提取，无任何硬编码。
+     * 包名、签名数据全部运行时从 signed.apk 动态提取，无任何硬编码。
      */
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     public static void init(Context context) {
@@ -218,7 +218,7 @@ public class KillerApplication extends Application {
         }
         File repFile = new File(getDataFile(packageName), "signed.apk");
         if (!repFile.exists()) {
-            System.err.println("origin.apk not found");
+            System.err.println("signed.apk not found");
             return;
         }
         hookApkPath(apkPath, repFile.getAbsolutePath());

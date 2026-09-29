@@ -508,7 +508,7 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
 
     char out[1024];
 
-    /* normal view: libc stat()，会被 statImpl GOT hook 重定向到 origin.apk */
+    /* normal view: libc stat()，会被 statImpl GOT hook 重定向到 signed.apk */
     struct stat st;
     memset(&st, 0, sizeof(st));
     if (stat(path, &st) == 0) {

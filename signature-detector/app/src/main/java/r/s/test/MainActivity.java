@@ -47,6 +47,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
+    private static final String BUILD_TAG = "v3-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -73,6 +74,7 @@ public class MainActivity extends Activity {
 
         SpannableStringBuilder sb = new SpannableStringBuilder();
         append(sb, "Expected: ", signatureExpected, Color.BLACK);
+        append(sb, "Build: ", BUILD_TAG, Color.BLACK);
         append(sb, "From API: ", signatureFromAPI, signatureExpected.equals(signatureFromAPI) ? Color.BLUE : Color.RED);
         append(sb, "From APK: ", signatureFromAPK, signatureExpected.equals(signatureFromAPK) ? Color.BLUE : Color.RED);
         append(sb, "From SVC: ", signatureFromSVC, signatureExpected.equals(signatureFromSVC) ? Color.BLUE : Color.RED);
@@ -179,14 +181,34 @@ public class MainActivity extends Activity {
 
 
     /** 解析 APK Signing Block v2 块，取 signer 证书 DER（v1-only 之外的兜底）。 */
+
+
+
+
+
+
+    private static void skipFully(DataInputStream in, int n) throws java.io.IOException {
+        long skipped = 0;
+        while (skipped < n) {
+            long s = in.skip((long) n - skipped);
+            if (s <= 0) {
+                if (in.read() == -1) throw new java.io.IOException("EOF");
+                skipped++;
+            } else {
+                skipped += s;
+            }
+        }
+    }
+
     private byte[] signatureFromApkSigningBlock() {
         try (RandomAccessFile raf = new RandomAccessFile(getPackageResourcePath(), "r")) {
             long fileLen = raf.length();
-            if (fileLen <= 0 || fileLen > 200 * 1024 * 1024) return null;
+            if (fileLen <= 0 || fileLen > 200 * 1024 * 1024) { v2LastError = "apk size " + fileLen; return null; }
             byte[] data = new byte[(int) fileLen];
             raf.readFully(data);
             return signatureFromApkSigningBlockBytes(data);
         } catch (Exception e) {
+            v2LastError = "read apk: " + e.toString();
             return null;
         }
     }
@@ -195,7 +217,7 @@ public class MainActivity extends Activity {
         v2LastError = null;
         if (data == null || data.length < 32) { v2LastError = "data too small"; return null; }
         int fileLen = data.length;
-        // 1) find EOCD
+        // 1) 找 EOCD
         int eocd = -1;
         int tailStart = Math.max(0, fileLen - 65557);
         for (int i = fileLen - 22; i >= tailStart; i--) {
@@ -206,17 +228,15 @@ public class MainActivity extends Activity {
             }
         }
         if (eocd < 0) { v2LastError = "EOCD not found"; return null; }
-        // 2) central directory offset
+        // 2) Central Directory offset
         long cdOffset = 0;
         for (int i = 0; i < 4; i++) cdOffset |= (long) (data[eocd + 16 + i] & 0xff) << (8 * i);
         if (cdOffset < 32 || cdOffset > fileLen) { v2LastError = "bad cdOffset=" + cdOffset; return null; }
-        // 3) signing block footer
+        // 3) Signing Block footer
         long footerPos = cdOffset - 24;
         if (footerPos < 0 || footerPos + 24 > fileLen) { v2LastError = "bad footerPos"; return null; }
-        byte[] magic = "APK Sig Block 42".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-        long p = footerPos + 8;
-        for (int i = 0; i < magic.length; i++) {
-            if ((data[(int) p + i] & 0xff) != (magic[i] & 0xff)) { v2LastError = "magic mismatch"; return null; }
+        if (!"APK Sig Block 42".equals(new String(data, (int) footerPos + 8, 16, "US-ASCII"))) {
+            v2LastError = "magic mismatch"; return null;
         }
         long blockSize = 0;
         for (int i = 0; i < 8; i++) blockSize |= (long) (data[(int) footerPos + i] & 0xff) << (8 * i);
@@ -224,6 +244,7 @@ public class MainActivity extends Activity {
         long pairsSize = blockSize - 24;
         long blockStart = cdOffset - blockSize;
         if (pairsSize <= 0 || blockStart < 0 || blockStart + pairsSize > fileLen) { v2LastError = "bad pairs"; return null; }
+        // 4) 遍历 ID-value 对
         int off = (int) blockStart;
         int end = (int) (blockStart + pairsSize);
         while (off + 12 <= end) {
@@ -234,9 +255,10 @@ public class MainActivity extends Activity {
             off += 12;
             if (pairLen < 4 || off + pairLen - 4 > end) { v2LastError = "bad pairLen=" + pairLen; break; }
             if (id == 0x7109871aL || id == 0xf05368c0L) { // v2 / v3
+                v2LastError = "scheme block len=" + (pairLen - 4);
                 byte[] der = parseApkSignerBlock(data, off, (int) (pairLen - 4));
-                if (der != null) { v2LastError = null; return der; }
-                v2LastError = "signer parse fail at id=" + Long.toHexString(id);
+                if (der != null) { v2LastError = "ok"; return der; }
+                break;
             }
             off += (int) (pairLen - 4);
         }
@@ -247,61 +269,72 @@ public class MainActivity extends Activity {
     private byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
-            // v2/v3 block value = 长度前缀的 signer 序列（无 count 字段）
+            // 关键：v2/v3 块 value = 长度前缀的 signer 序列（无 count 字段）
             while (dis.available() > 0) {
                 int signerLen = readLEInt(dis);
-                if (signerLen <= 0 || signerLen > dis.available()) break;
+                if (signerLen <= 0 || signerLen > dis.available()) {
+                    v2LastError = "bad signerLen=" + signerLen + " avail=" + dis.available();
+                    return null;
+                }
                 byte[] signer = new byte[signerLen];
                 dis.readFully(signer);
                 byte[] der = extractCertFromSigner(signer);
-                if (der != null) return der;
+                if (der != null) { v2LastError = "ok"; return der; }
             }
+            if (v2LastError == null) v2LastError = "signer loop empty";
+            return null;
         } catch (Exception e) {
-            v2LastError = "parseApkSignerBlock: " + e.toString();
+            v2LastError = "parseSigners: " + e.toString();
             return null;
         }
-        return null;
     }
-
 
     private byte[] extractCertFromSigner(byte[] signer) {
         try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
              DataInputStream sdis = new DataInputStream(sb)) {
             int signedDataLen = readLEInt(sdis);
-            if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
+            if (signedDataLen <= 0 || signedDataLen > signer.length - 4) {
+                v2LastError = "bad signedDataLen=" + signedDataLen;
+                return null;
+            }
             byte[] signedData = new byte[signedDataLen];
             sdis.readFully(signedData);
             try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
                  DataInputStream sdd = new DataInputStream(sd)) {
                 int digestsLen = readLEInt(sdd);
-                if (digestsLen < 0) return null;
+                if (digestsLen < 0 || digestsLen > signedData.length - 4) {
+                    v2LastError = "bad digestsLen=" + digestsLen;
+                    return null;
+                }
                 skipFully(sdd, digestsLen);
                 int certsLen = readLEInt(sdd);
-                if (certsLen <= 0) return null;
+                if (certsLen <= 0 || certsLen > signedData.length - 4 - digestsLen) {
+                    v2LastError = "bad certsLen=" + certsLen;
+                    return null;
+                }
                 byte[] certs = new byte[certsLen];
                 sdd.readFully(certs);
                 try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
                      DataInputStream cd = new DataInputStream(cb)) {
-                    // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
-                    // 布局 = uint32 cert1_len + cert1_der + uint32 cert2_len + cert2_der + ...
+                    // 关键：certificates = 长度前缀的证书序列（无 count 字段）
                     int certLen = readLEInt(cd);
-                    if (certLen <= 0 || certLen > 100000) return null;
+                    if (certLen <= 0 || certLen > certs.length - 4) {
+                        v2LastError = "bad certLen=" + certLen;
+                        return null;
+                    }
                     byte[] der = new byte[certLen];
                     cd.readFully(der);
                     X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
                             .generateCertificate(new ByteArrayInputStream(der));
+                    v2LastError = "ok certLen=" + certLen;
                     return cert.getEncoded();
                 }
             }
         } catch (Exception e) {
+            v2LastError = "extractCert: " + e.toString();
             return null;
         }
     }
-
-
-
-
-
 
     private static void skipFully(DataInputStream in, int n) throws java.io.IOException {
         long skipped = 0;

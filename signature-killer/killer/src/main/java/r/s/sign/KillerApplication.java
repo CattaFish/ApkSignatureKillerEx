@@ -118,6 +118,22 @@ public class KillerApplication extends Application {
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
 
+    /* ============ APK Signature Scheme v2/v3 解析 ============ */
+
+
+    private static void skipFully(DataInputStream in, int n) throws IOException {
+        long skipped = 0;
+        while (skipped < n) {
+            long s = in.skip((long) n - skipped);
+            if (s <= 0) {
+                if (in.read() == -1) throw new IOException("EOF");
+                skipped++;
+            } else {
+                skipped += s;
+            }
+        }
+    }
+
     private static byte[] readSignatureFromApk(File apkFile) {
         if (apkFile == null || !apkFile.exists()) return null;
         // 1) v1: META-INF 证书
@@ -129,63 +145,58 @@ public class KillerApplication extends Application {
                     try (InputStream is = zip.getInputStream(entry)) {
                         CertificateFactory cf = CertificateFactory.getInstance("X509");
                         X509Certificate cert = (X509Certificate) cf.generateCertificate(is);
+                        Log.d(TAG, "init: sig scheme=v1 len=" + cert.getEncoded().length);
                         return cert.getEncoded();
                     }
                 }
             }
         } catch (Exception ignored) {
         }
-        // 2) v2/v3: APK Signing Block（v1-only 之外的必需兜底）
-        return readSignatureFromSigningBlock(apkFile);
+        // 2) v2/v3: APK Signing Block（little-endian 长度字段）
+        byte[] v23 = readSignatureFromSigningBlock(apkFile);
+        Log.d(TAG, "init: sig scheme=v2/v3 len=" + (v23 != null ? v23.length : 0));
+        return v23;
     }
-
-    /* ============ APK Signature Scheme v2/v3 解析 ============ */
 
     private static byte[] readSignatureFromSigningBlock(File apkFile) {
         try (RandomAccessFile raf = new RandomAccessFile(apkFile, "r")) {
             long fileLen = raf.length();
-            if (fileLen < 22) return null;
-            int tailLen = (int) Math.min(fileLen, 65557);
-            byte[] tail = new byte[tailLen];
-            raf.seek(fileLen - tailLen);
-            raf.readFully(tail);
+            if (fileLen < 32 || fileLen > 200 * 1024 * 1024) return null;
+            byte[] data = new byte[(int) fileLen];
+            raf.readFully(data);
             int eocd = -1;
-            for (int i = tailLen - 22; i >= 0; i--) {
-                if ((tail[i] & 0xff) == 0x50 && (tail[i + 1] & 0xff) == 0x4b
-                        && (tail[i + 2] & 0xff) == 0x05 && (tail[i + 3] & 0xff) == 0x06) {
+            int tailStart = Math.max(0, data.length - 65557);
+            for (int i = data.length - 22; i >= tailStart; i--) {
+                if ((data[i] & 0xff) == 0x50 && (data[i + 1] & 0xff) == 0x4b
+                        && (data[i + 2] & 0xff) == 0x05 && (data[i + 3] & 0xff) == 0x06) {
                     eocd = i;
                     break;
                 }
             }
             if (eocd < 0) return null;
             long cdOffset = 0;
-            for (int i = 0; i < 4; i++) cdOffset |= (long) (tail[eocd + 16 + i] & 0xff) << (8 * i);
-            if (cdOffset < 32) return null;
+            for (int i = 0; i < 4; i++) cdOffset |= (long) (data[eocd + 16 + i] & 0xff) << (8 * i);
+            if (cdOffset < 32 || cdOffset > data.length) return null;
             long footerPos = cdOffset - 24;
-            raf.seek(footerPos);
-            byte[] footer = new byte[24];
-            raf.readFully(footer);
-            if (!"APK Sig Block 42".equals(new String(footer, 8, 16, "US-ASCII"))) return null;
+            if (footerPos < 0 || footerPos + 24 > data.length) return null;
+            if (!"APK Sig Block 42".equals(new String(data, (int) footerPos + 8, 16, "US-ASCII"))) return null;
             long blockSize = 0;
-            for (int i = 0; i < 8; i++) blockSize |= (long) (footer[i] & 0xff) << (8 * i);
+            for (int i = 0; i < 8; i++) blockSize |= (long) (data[(int) footerPos + i] & 0xff) << (8 * i);
             if (blockSize < 24 || blockSize > 100 * 1024 * 1024) return null;
             long pairsSize = blockSize - 24;
-            if (pairsSize <= 0 || pairsSize > 100 * 1024 * 1024) return null;
             long blockStart = cdOffset - blockSize;
-            if (blockStart < 0) return null;
-            raf.seek(blockStart);
-            byte[] pairs = new byte[(int) pairsSize];
-            raf.readFully(pairs);
-            int off = 0;
-            while (off + 12 <= pairs.length) {
+            if (pairsSize <= 0 || blockStart < 0 || blockStart + pairsSize > data.length) return null;
+            int off = (int) blockStart;
+            int end = (int) (blockStart + pairsSize);
+            while (off + 12 <= end) {
                 long pairLen = 0;
-                for (int i = 0; i < 8; i++) pairLen |= (long) (pairs[off + i] & 0xff) << (8 * i);
+                for (int i = 0; i < 8; i++) pairLen |= (long) (data[off + i] & 0xff) << (8 * i);
                 long id = 0;
-                for (int i = 0; i < 4; i++) id |= (long) (pairs[off + 8 + i] & 0xff) << (8 * i);
+                for (int i = 0; i < 4; i++) id |= (long) (data[off + 8 + i] & 0xff) << (8 * i);
                 off += 12;
-                if (pairLen < 4 || off + pairLen - 4 > (long) pairs.length) break;
-                if (id == 0x7109871aL || id == 0xf05368c0L) { // v2 / v3
-                    byte[] der = parseApkSignerBlock(pairs, off, (int) (pairLen - 4));
+                if (pairLen < 4 || off + pairLen - 4 > end) break;
+                if (id == 0x7109871aL || id == 0xf05368c0L) {
+                    byte[] der = parseApkSignerBlock(data, off, (int) (pairLen - 4));
                     if (der != null) return der;
                 }
                 off += (int) (pairLen - 4);
@@ -198,7 +209,7 @@ public class KillerApplication extends Application {
     private static byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
-            // v2/v3 block value = 长度前缀的 signer 序列（无 count 字段）
+            // v2/v3 value = 长度前缀 signer 序列（无 count）
             while (dis.available() > 0) {
                 int signerLen = readLEInt(dis);
                 if (signerLen <= 0 || signerLen > dis.available()) break;
@@ -212,30 +223,27 @@ public class KillerApplication extends Application {
         return null;
     }
 
-
     private static byte[] extractCertFromSigner(byte[] signer) {
         try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
              DataInputStream sdis = new DataInputStream(sb)) {
-            // Signer: SignedData | signatures | publicKey
             int signedDataLen = readLEInt(sdis);
             if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
             byte[] signedData = new byte[signedDataLen];
             sdis.readFully(signedData);
             try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
                  DataInputStream sdd = new DataInputStream(sd)) {
-                // SignedData: digests | certificates | attributes
                 int digestsLen = readLEInt(sdd);
-                if (digestsLen < 0) return null;
+                if (digestsLen < 0 || digestsLen > signedData.length - 4) return null;
                 skipFully(sdd, digestsLen);
                 int certsLen = readLEInt(sdd);
-                if (certsLen <= 0) return null;
+                if (certsLen <= 0 || certsLen > signedData.length - 4 - digestsLen) return null;
                 byte[] certs = new byte[certsLen];
                 sdd.readFully(certs);
                 try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
                      DataInputStream cd = new DataInputStream(cb)) {
-                    // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
+                    // certificates = 长度前缀证书序列（无 count）
                     int certLen = readLEInt(cd);
-                    if (certLen <= 0 || certLen > 100000) return null;
+                    if (certLen <= 0 || certLen > certs.length - 4) return null;
                     byte[] der = new byte[certLen];
                     cd.readFully(der);
                     X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")

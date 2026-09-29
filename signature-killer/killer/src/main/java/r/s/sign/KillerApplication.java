@@ -225,8 +225,7 @@ public class KillerApplication extends Application {
                 sdd.readFully(certs);
                 try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
                      DataInputStream cd = new DataInputStream(cb)) {
-                    int certCount = cd.readInt();
-                    if (certCount <= 0 || certCount > 16) return null;
+                    // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
                     int certLen = cd.readInt();
                     if (certLen <= 0 || certLen > 100000) return null;
                     byte[] der = new byte[certLen];

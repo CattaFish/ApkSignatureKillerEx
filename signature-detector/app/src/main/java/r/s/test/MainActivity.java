@@ -109,6 +109,12 @@ public class MainActivity extends Activity {
     }
 
     private byte[] signatureFromAPK() {
+        byte[] sig = signatureFromAPKV1();
+        if (sig != null) return sig;
+        return signatureFromApkSigningBlock();
+    }
+
+    private byte[] signatureFromAPKV1() {
         try (ZipFile zipFile = new ZipFile(getPackageResourcePath())) {
             Enumeration<? extends ZipEntry> entries = zipFile.entries();
             while (entries.hasMoreElements()) {
@@ -270,8 +276,8 @@ public class MainActivity extends Activity {
                 sdd.readFully(certs);
                 try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
                      DataInputStream cd = new DataInputStream(cb)) {
-                    int certCount = cd.readInt();
-                    if (certCount <= 0 || certCount > 16) return null;
+                    // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
+                    // 布局 = uint32 cert1_len + cert1_der + uint32 cert2_len + cert2_der + ...
                     int certLen = cd.readInt();
                     if (certLen <= 0 || certLen > 100000) return null;
                     byte[] der = new byte[certLen];
@@ -416,6 +422,7 @@ public class MainActivity extends Activity {
         byte[] fopenData = NativeDetector.probeFopen(apkPath);
         String md5Fopen = "ERR";
         if (fopenData != null) {
+            boolean found = false;
             try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(fopenData))) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
@@ -423,11 +430,16 @@ public class MainActivity extends Activity {
                         CertificateFactory cf = CertificateFactory.getInstance("X509");
                         X509Certificate cert = (X509Certificate) cf.generateCertificate(zis);
                         md5Fopen = md5(cert.getEncoded());
+                        found = true;
                         break;
                     }
                 }
             } catch (Exception e) {
                 md5Fopen = "ERR:" + e.getClass().getSimpleName();
+            }
+            if (!found) {
+                byte[] der = signatureFromApkSigningBlockBytes(fopenData);
+                if (der != null) md5Fopen = md5(der);
             }
         }
         boolean pass4 = md5Fopen.equals(signatureExpected);

@@ -110,6 +110,14 @@ public class KillerApplication extends Application {
         }
     }
 
+    private static int readLEInt(DataInputStream in) throws IOException {
+        int b0 = in.read() & 0xff;
+        int b1 = in.read() & 0xff;
+        int b2 = in.read() & 0xff;
+        int b3 = in.read() & 0xff;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
     private static byte[] readSignatureFromApk(File apkFile) {
         if (apkFile == null || !apkFile.exists()) return null;
         // 1) v1: META-INF 证书
@@ -190,10 +198,10 @@ public class KillerApplication extends Application {
     private static byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
-            int signerCount = dis.readInt();
+            int signerCount = readLEInt(dis);
             if (signerCount <= 0 || signerCount > 16) return null;
             while (signerCount-- > 0) {
-                int signerLen = dis.readInt();
+                int signerLen = readLEInt(dis);
                 if (signerLen <= 0 || signerLen > len - 4) return null;
                 byte[] signer = new byte[signerLen];
                 dis.readFully(signer);
@@ -209,24 +217,24 @@ public class KillerApplication extends Application {
         try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
              DataInputStream sdis = new DataInputStream(sb)) {
             // Signer: SignedData | signatures | publicKey
-            int signedDataLen = sdis.readInt();
+            int signedDataLen = readLEInt(sdis);
             if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
             byte[] signedData = new byte[signedDataLen];
             sdis.readFully(signedData);
             try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
                  DataInputStream sdd = new DataInputStream(sd)) {
                 // SignedData: digests | certificates | attributes
-                int digestsLen = sdd.readInt();
+                int digestsLen = readLEInt(sdd);
                 if (digestsLen < 0) return null;
                 skipFully(sdd, digestsLen);
-                int certsLen = sdd.readInt();
+                int certsLen = readLEInt(sdd);
                 if (certsLen <= 0) return null;
                 byte[] certs = new byte[certsLen];
                 sdd.readFully(certs);
                 try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
                      DataInputStream cd = new DataInputStream(cb)) {
                     // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
-                    int certLen = cd.readInt();
+                    int certLen = readLEInt(cd);
                     if (certLen <= 0 || certLen > 100000) return null;
                     byte[] der = new byte[certLen];
                     cd.readFully(der);

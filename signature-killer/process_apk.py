@@ -69,7 +69,7 @@ def list_smali_dirs(decoded):
 
 
 def get_apk_signature_md5(apk_path):
-    """从输入 APK 的 v1 签名块读证书 DER，返回与 Java X509Certificate.getEncoded() 一致的 MD5。"""
+    """读取输入 APK 证书 DER 的 MD5（v1 优先，v2/v3 兜底），与 Java X509Certificate.getEncoded() 一致。"""
     try:
         with zipfile.ZipFile(apk_path) as z:
             entry = None
@@ -77,25 +77,76 @@ def get_apk_signature_md5(apk_path):
                 if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I):
                     entry = n
                     break
-            if entry is None:
-                return None
-            data = z.read(entry)
-        fd, p7 = tempfile.mkstemp(suffix=".pkcs7")
-        os.close(fd)
-        with open(p7, "wb") as f:
-            f.write(data)
-        try:
-            r1 = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", p7,
-                                 "-print_certs", "-outform", "DER"], capture_output=True)
-            if r1.returncode != 0 or not r1.stdout:
-                return None
-            r2 = subprocess.run(["openssl", "x509", "-inform", "DER", "-outform", "DER"],
-                                input=r1.stdout, capture_output=True)
-            if r2.returncode != 0 or not r2.stdout:
-                return None
-            return hashlib.md5(r2.stdout).hexdigest()
-        finally:
-            os.unlink(p7)
+            if entry is not None:
+                fd, p7 = tempfile.mkstemp(suffix=".pkcs7")
+                os.close(fd)
+                with open(p7, "wb") as f:
+                    f.write(z.read(entry))
+                try:
+                    r1 = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", p7,
+                                         "-print_certs", "-outform", "DER"], capture_output=True)
+                    if r1.returncode == 0 and r1.stdout:
+                        r2 = subprocess.run(["openssl", "x509", "-inform", "DER", "-outform", "DER"],
+                                            input=r1.stdout, capture_output=True)
+                        if r2.returncode == 0 and r2.stdout:
+                            return hashlib.md5(r2.stdout).hexdigest()
+                finally:
+                    os.unlink(p7)
+        # v2/v3 fallback：APK Signing Block（little-endian）
+        import struct
+        with open(apk_path, "rb") as f:
+            data = f.read()
+        if len(data) < 32:
+            return None
+        eocd = -1
+        tail_start = max(0, len(data) - 65557)
+        for i in range(len(data) - 22, tail_start - 1, -1):
+            if data[i:i+4] == b"PK\x05\x06":
+                eocd = i
+                break
+        if eocd < 0:
+            return None
+        cd_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+        if cd_offset < 32 or cd_offset > len(data):
+            return None
+        footer_pos = cd_offset - 24
+        if footer_pos < 0 or footer_pos + 24 > len(data):
+            return None
+        if data[footer_pos+8:footer_pos+24] != b"APK Sig Block 42":
+            return None
+        block_size = struct.unpack_from("<Q", data, footer_pos)[0]
+        pairs_size = block_size - 24
+        block_start = cd_offset - block_size
+        if block_size < 24 or pairs_size <= 0 or block_start < 0 or block_start + pairs_size > len(data):
+            return None
+        off = block_start
+        end = block_start + pairs_size
+        while off + 12 <= end:
+            pair_len = struct.unpack_from("<Q", data, off)[0]
+            pair_id = struct.unpack_from("<I", data, off + 8)[0]
+            off += 12
+            if pair_len < 4 or off + pair_len - 4 > end:
+                break
+            if pair_id in (0x7109871a, 0xf05368c0):
+                value = data[off:off + pair_len - 4]
+                try:
+                    signer_count = struct.unpack_from("<I", value, 0)[0]
+                    if signer_count <= 0 or signer_count > 16:
+                        return None
+                    signer_len = struct.unpack_from("<I", value, 4)[0]
+                    signer = value[8:8 + signer_len]
+                    signed_len = struct.unpack_from("<I", signer, 0)[0]
+                    signed = signer[4:4 + signed_len]
+                    digests_len = struct.unpack_from("<I", signed, 0)[0]
+                    certs_len = struct.unpack_from("<I", signed, 4 + digests_len)[0]
+                    certs = signed[8 + digests_len:8 + digests_len + certs_len]
+                    cert_len = struct.unpack_from("<I", certs, 0)[0]
+                    cert_der = certs[4:4 + cert_len]
+                    return hashlib.md5(cert_der).hexdigest()
+                except Exception:
+                    return None
+            off += int(pair_len - 4)
+        return None
     except Exception as e:
         print(f"[warn] 签名解析异常: {e}")
         return None

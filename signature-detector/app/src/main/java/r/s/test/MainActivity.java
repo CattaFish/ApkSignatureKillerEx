@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
+    private String v2LastError;
 
 
     @SuppressLint("SetTextI18n")
@@ -94,6 +95,7 @@ public class MainActivity extends Activity {
         }
 
         runDetectors(sb, signatureExpected);
+        append(sb, "V2DBG: ", v2LastError == null ? "ok" : v2LastError, Color.GRAY);
 
         msg.setText(sb);
     }
@@ -190,7 +192,8 @@ public class MainActivity extends Activity {
     }
 
     private byte[] signatureFromApkSigningBlockBytes(byte[] data) {
-        if (data == null || data.length < 32) return null;
+        v2LastError = null;
+        if (data == null || data.length < 32) { v2LastError = "data too small"; return null; }
         int fileLen = data.length;
         // 1) find EOCD
         int eocd = -1;
@@ -202,25 +205,25 @@ public class MainActivity extends Activity {
                 break;
             }
         }
-        if (eocd < 0) return null;
+        if (eocd < 0) { v2LastError = "EOCD not found"; return null; }
         // 2) central directory offset
         long cdOffset = 0;
         for (int i = 0; i < 4; i++) cdOffset |= (long) (data[eocd + 16 + i] & 0xff) << (8 * i);
-        if (cdOffset < 32 || cdOffset > fileLen) return null;
+        if (cdOffset < 32 || cdOffset > fileLen) { v2LastError = "bad cdOffset=" + cdOffset; return null; }
         // 3) signing block footer
         long footerPos = cdOffset - 24;
-        if (footerPos < 0 || footerPos + 24 > fileLen) return null;
+        if (footerPos < 0 || footerPos + 24 > fileLen) { v2LastError = "bad footerPos"; return null; }
         byte[] magic = "APK Sig Block 42".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         long p = footerPos + 8;
         for (int i = 0; i < magic.length; i++) {
-            if ((data[(int) p + i] & 0xff) != (magic[i] & 0xff)) return null;
+            if ((data[(int) p + i] & 0xff) != (magic[i] & 0xff)) { v2LastError = "magic mismatch"; return null; }
         }
         long blockSize = 0;
         for (int i = 0; i < 8; i++) blockSize |= (long) (data[(int) footerPos + i] & 0xff) << (8 * i);
-        if (blockSize < 24 || blockSize > 100 * 1024 * 1024) return null;
+        if (blockSize < 24 || blockSize > 100 * 1024 * 1024) { v2LastError = "bad blockSize=" + blockSize; return null; }
         long pairsSize = blockSize - 24;
         long blockStart = cdOffset - blockSize;
-        if (pairsSize <= 0 || blockStart < 0 || blockStart + pairsSize > fileLen) return null;
+        if (pairsSize <= 0 || blockStart < 0 || blockStart + pairsSize > fileLen) { v2LastError = "bad pairs"; return null; }
         int off = (int) blockStart;
         int end = (int) (blockStart + pairsSize);
         while (off + 12 <= end) {
@@ -229,23 +232,25 @@ public class MainActivity extends Activity {
             long id = 0;
             for (int i = 0; i < 4; i++) id |= (long) (data[off + 8 + i] & 0xff) << (8 * i);
             off += 12;
-            if (pairLen < 4 || off + pairLen - 4 > end) break;
+            if (pairLen < 4 || off + pairLen - 4 > end) { v2LastError = "bad pairLen=" + pairLen; break; }
             if (id == 0x7109871aL || id == 0xf05368c0L) { // v2 / v3
                 byte[] der = parseApkSignerBlock(data, off, (int) (pairLen - 4));
-                if (der != null) return der;
+                if (der != null) { v2LastError = null; return der; }
+                v2LastError = "signer parse fail at id=" + Long.toHexString(id);
             }
             off += (int) (pairLen - 4);
         }
+        if (v2LastError == null) v2LastError = "no v2/v3 pair";
         return null;
     }
 
     private byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
-            int signerCount = dis.readInt();
+            int signerCount = readLEInt(dis);
             if (signerCount <= 0 || signerCount > 16) return null;
             while (signerCount-- > 0) {
-                int signerLen = dis.readInt();
+                int signerLen = readLEInt(dis);
                 if (signerLen <= 0 || signerLen > len - 4) return null;
                 byte[] signer = new byte[signerLen];
                 dis.readFully(signer);
@@ -253,6 +258,7 @@ public class MainActivity extends Activity {
                 if (der != null) return der;
             }
         } catch (Exception e) {
+            v2LastError = "parseApkSignerBlock: " + e.toString();
             return null;
         }
         return null;
@@ -261,16 +267,16 @@ public class MainActivity extends Activity {
     private byte[] extractCertFromSigner(byte[] signer) {
         try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
              DataInputStream sdis = new DataInputStream(sb)) {
-            int signedDataLen = sdis.readInt();
+            int signedDataLen = readLEInt(sdis);
             if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
             byte[] signedData = new byte[signedDataLen];
             sdis.readFully(signedData);
             try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
                  DataInputStream sdd = new DataInputStream(sd)) {
-                int digestsLen = sdd.readInt();
+                int digestsLen = readLEInt(sdd);
                 if (digestsLen < 0) return null;
                 skipFully(sdd, digestsLen);
-                int certsLen = sdd.readInt();
+                int certsLen = readLEInt(sdd);
                 if (certsLen <= 0) return null;
                 byte[] certs = new byte[certsLen];
                 sdd.readFully(certs);
@@ -278,7 +284,7 @@ public class MainActivity extends Activity {
                      DataInputStream cd = new DataInputStream(cb)) {
                     // v2/v3: certificates 区是 length-prefixed sequence（无 count 字段）
                     // 布局 = uint32 cert1_len + cert1_der + uint32 cert2_len + cert2_der + ...
-                    int certLen = cd.readInt();
+                    int certLen = readLEInt(cd);
                     if (certLen <= 0 || certLen > 100000) return null;
                     byte[] der = new byte[certLen];
                     cd.readFully(der);
@@ -325,6 +331,15 @@ public class MainActivity extends Activity {
 
     private String safeBase64(byte[] data) {
         return data == null ? "<null>" : Base64.encodeToString(data, Base64.DEFAULT);
+    }
+
+    /** APK v2/v3 长度字段全部是 little-endian uint32；DataInputStream.readInt() 是大端，必须手动反转 */
+    private static int readLEInt(DataInputStream in) throws java.io.IOException {
+        int b0 = in.read() & 0xff;
+        int b1 = in.read() & 0xff;
+        int b2 = in.read() & 0xff;
+        int b3 = in.read() & 0xff;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
 
     private String md5(byte[] bytes) {

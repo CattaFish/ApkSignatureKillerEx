@@ -7,6 +7,8 @@
 #define SIGB_CORE_STAT_NR __NR_fstatat64
 #endif
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -22,7 +24,8 @@
 
 static char *g_apk_path = NULL;
 static char *g_rep_path = NULL;
-static int g_state = SIGB_STATE_NORMAL;
+static atomic_int g_state = SIGB_STATE_NORMAL;
+static pthread_mutex_t g_rep_id_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char *dup_str(const char *s) {
     if (s == NULL) return NULL;
@@ -34,8 +37,10 @@ static char *dup_str(const char *s) {
 }
 
 void sigb_set_target_paths(const char *apk, const char *rep) {
-    free(g_apk_path);
-    free(g_rep_path);
+    /* set-once：hook 注册后运行期禁止改路径，避免并发读取 use-after-free */
+    if (g_apk_path != NULL || g_rep_path != NULL) {
+        return;
+    }
     g_apk_path = dup_str(apk);
     g_rep_path = dup_str(rep);
 }
@@ -79,11 +84,11 @@ int sigb_maybe_relevant(const char *path) {
 
 
 void sigb_set_state(int state) {
-    g_state = state;
+    atomic_store_explicit(&g_state, state, memory_order_relaxed);
 }
 
 int sigb_get_state(void) {
-    return g_state;
+    return atomic_load_explicit(&g_state, memory_order_relaxed);
 }
 
 int sigb_is_normal(void) {
@@ -216,7 +221,11 @@ static int sigb_path_matches_apk(const char *path) {
 static int sigb_query_rep_id(char *dev_out, size_t dev_size, unsigned long long *inode_out) {
     const char *rep = sigb_get_rep_path();
     if (rep == NULL || dev_out == NULL || inode_out == NULL || dev_size == 0) return 0;
+#if defined(__LP64__)
     struct stat st;
+#else
+    struct stat64 st;   /* 32 位下 fstatat64 写入 64 位布局 */
+#endif
     memset(&st, 0, sizeof(st));
     long rc = syscall(SIGB_CORE_STAT_NR, AT_FDCWD, rep, &st, 0);
     if (rc != 0) {
@@ -239,8 +248,10 @@ static unsigned long long g_rep_ino = 0;
 static int sigb_get_rep_id_cached(char *dev_out, size_t dev_size, unsigned long long *inode_out) {
     const char *rep = sigb_get_rep_path();
     if (rep == NULL || dev_out == NULL || inode_out == NULL || dev_size == 0) return 0;
+    pthread_mutex_lock(&g_rep_id_mutex);
     if (!g_rep_id_ready || strcmp(g_cached_rep, rep) != 0) {
         if (!sigb_query_rep_id(g_rep_dev, sizeof(g_rep_dev), &g_rep_ino)) {
+            pthread_mutex_unlock(&g_rep_id_mutex);
             return 0;
         }
         size_t rep_len = strlen(rep);
@@ -251,6 +262,7 @@ static int sigb_get_rep_id_cached(char *dev_out, size_t dev_size, unsigned long 
     }
     snprintf(dev_out, dev_size, "%s", g_rep_dev);
     *inode_out = g_rep_ino;
+    pthread_mutex_unlock(&g_rep_id_mutex);
     return 1;
 }
 

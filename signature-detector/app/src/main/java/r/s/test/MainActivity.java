@@ -17,6 +17,8 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.RandomAccessFile;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -46,6 +48,8 @@ public class MainActivity extends Activity {
     private static native int openAt(String path);
 
     private String repPath;
+    private byte[] apkSignatureCache;
+    private boolean apkSignatureCacheSet;
 
 
     @SuppressLint("SetTextI18n")
@@ -140,12 +144,115 @@ public class MainActivity extends Activity {
     }
 
 
+    /** 解析 APK Signing Block v2 块，取 signer 证书 DER（v1-only 之外的兜底）。 */
+    private byte[] signatureFromApkSigningBlock() {
+        try (RandomAccessFile raf = new RandomAccessFile(getPackageResourcePath(), "r")) {
+            long fileLen = raf.length();
+            if (fileLen < 22) return null;
+            int tailLen = (int) Math.min(fileLen, 65557);
+            byte[] tail = new byte[tailLen];
+            raf.seek(fileLen - tailLen);
+            raf.readFully(tail);
+            int eocd = -1;
+            for (int i = tailLen - 22; i >= 0; i--) {
+                if ((tail[i] & 0xff) == 0x50 && (tail[i + 1] & 0xff) == 0x4b
+                        && (tail[i + 2] & 0xff) == 0x05 && (tail[i + 3] & 0xff) == 0x06) {
+                    eocd = i;
+                    break;
+                }
+            }
+            if (eocd < 0) return null;
+            long cdOffset = 0;
+            for (int i = 0; i < 4; i++) {
+                cdOffset |= (long) (tail[eocd + 16 + i] & 0xff) << (8 * i);
+            }
+            if (cdOffset < 32) return null;
+            long footerPos = cdOffset - 24;
+            raf.seek(footerPos);
+            byte[] footer = new byte[24];
+            raf.readFully(footer);
+            if (!"APK Sig Block 42".equals(new String(footer, 8, 16, "US-ASCII"))) return null;
+            long blockSize = 0;
+            for (int i = 0; i < 8; i++) blockSize |= (long) (footer[i] & 0xff) << (8 * i);
+            if (blockSize < 24 || blockSize > 100 * 1024 * 1024) return null;
+            long pairsSize = blockSize - 24;
+            if (pairsSize <= 0 || pairsSize > 100 * 1024 * 1024) return null;
+            long blockStart = cdOffset - blockSize;
+            if (blockStart < 0) return null;
+            raf.seek(blockStart);
+            byte[] pairs = new byte[(int) pairsSize];
+            raf.readFully(pairs);
+            int off = 0;
+            while (off + 12 <= pairs.length) {
+                long pairLen = 0;
+                for (int i = 0; i < 8; i++) pairLen |= (long) (pairs[off + i] & 0xff) << (8 * i);
+                long id = 0;
+                for (int i = 0; i < 4; i++) id |= (long) (pairs[off + 8 + i] & 0xff) << (8 * i);
+                off += 12;
+                if (pairLen < 4 || off + pairLen - 4 > (long) pairs.length) break;
+                if (id == 0x7109871aL) {
+                    return parseV2Signer(pairs, off, (int) (pairLen - 4));
+                }
+                off += (int) (pairLen - 4);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    private byte[] parseV2Signer(byte[] block, int start, int len) {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(block, start, len);
+             DataInputStream dis = new DataInputStream(bais)) {
+            int signerCount = dis.readInt();
+            if (signerCount <= 0 || signerCount > 16) return null;
+            int signerBytes = dis.readInt();
+            if (signerBytes <= 0 || signerBytes > len) return null;
+            byte[] signer = new byte[signerBytes];
+            dis.readFully(signer);
+            try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
+                 DataInputStream sdis = new DataInputStream(sb)) {
+                skipFully(sdis, sdis.readInt());
+                skipFully(sdis, sdis.readInt());
+                int certCount = sdis.readInt();
+                if (certCount <= 0 || certCount > 16) return null;
+                int certLen = sdis.readInt();
+                if (certLen <= 0 || certLen > 100000) return null;
+                byte[] der = new byte[certLen];
+                sdis.readFully(der);
+                X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
+                        .generateCertificate(new ByteArrayInputStream(der));
+                return cert.getEncoded();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void skipFully(DataInputStream in, int n) throws java.io.IOException {
+        long skipped = 0;
+        while (skipped < n) {
+            long s = in.skip((long) n - skipped);
+            if (s <= 0) {
+                if (in.read() == -1) throw new java.io.IOException("EOF");
+                skipped++;
+            } else {
+                skipped += s;
+            }
+        }
+    }
+
     private String getAPKPackageName() {
         return getApplicationContext().getPackageName();
     }
 
     private byte[] getAPKSignatureData() {
-        return signatureFromAPK();
+        if (apkSignatureCacheSet) return apkSignatureCache;
+        byte[] sig = signatureFromAPK();
+        if (sig == null) sig = signatureFromApkSigningBlock();
+        apkSignatureCache = sig;
+        apkSignatureCacheSet = true;
+        return sig;
     }
 
     private String md5(byte[] bytes) {

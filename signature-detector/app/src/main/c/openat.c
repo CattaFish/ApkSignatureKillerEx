@@ -14,49 +14,9 @@
 #define STR(x) STR_HELPER(x)
 
 intptr_t openAt(intptr_t fd, const char *path, intptr_t flag) {
-#if defined(__arm__)
-    intptr_t r;
-    asm volatile(
-#ifndef OPTIMIZE_ASM
-    "mov r0, %1\n\t"
-    "mov r1, %2\n\t"
-    "mov r2, %3\n\t"
-#endif
-
-    "mov ip, r7\n\t"
-    ".cfi_register r7, ip\n\t"
-    "mov r7, #" STR(__NR_openat) "\n\t"
-    "svc #0\n\t"
-    "mov r7, ip\n\t"
-    ".cfi_restore r7\n\t"
-
-#ifndef OPTIMIZE_ASM
-    "mov %0, r0\n\t"
-#endif
-    : "=r" (r)
-    : "r" (fd), "r" (path), "r" (flag));
-    return r;
-#elif defined(__aarch64__)
-    intptr_t r;
-    asm volatile(
-#ifndef OPTIMIZE_ASM
-    "mov x0, %1\n\t"
-    "mov x1, %2\n\t"
-    "mov x2, %3\n\t"
-#endif
-
-    "mov x8, #" STR(__NR_openat) "\n\t"
-    "svc #0\n\t"
-
-#ifndef OPTIMIZE_ASM
-    "mov %0, x0\n\t"
-#endif
-    : "=r" (r)
-    : "r" (fd), "r" (path), "r" (flag));
-    return r;
-#else
+    /* 直接用 libc syscall()：r7/x8/cc/memory 等 clobber 由编译器处理，
+       避免手写内联汇编漏 clobber 导致 -O2 下寄存器被破坏。 */
     return (intptr_t) syscall(__NR_openat, fd, path, flag);
-#endif
 }
 
 JNIEXPORT jint JNICALL

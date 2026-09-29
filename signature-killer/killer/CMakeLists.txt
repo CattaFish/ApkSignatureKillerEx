@@ -5,6 +5,9 @@
 
 cmake_minimum_required(VERSION 3.4.1)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
 set(CMAKE_C_FLAGS "-Wall -Wextra -Werror -fvisibility=hidden")
 
 add_library( # Sets the name of the library.

@@ -112,6 +112,7 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
 int (*old_open)(const char *, int, mode_t);
 static int openImpl(const char *pathname, int flags, mode_t mode) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old_open == NULL) { errno = ENOSYS; return -1; }
         return old_open(pathname, flags, mode);
     }
 
@@ -131,6 +132,7 @@ static int openImpl(const char *pathname, int flags, mode_t mode) {
 int (*old_open64)(const char *, int, mode_t);
 static int open64Impl(const char *pathname, int flags, mode_t mode) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old_open64 == NULL) { errno = ENOSYS; return -1; }
         return old_open64(pathname, flags, mode);
     }
 
@@ -150,6 +152,7 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
 int (*old_openat)(int, const char*, int, mode_t);
 static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old_openat == NULL) { errno = ENOSYS; return -1; }
         return old_openat(fd, pathname, flags, mode);
     }
 
@@ -169,6 +172,7 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
 int (*old_openat64)(int, const char*, int, mode_t);
 static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old_openat64 == NULL) { errno = ENOSYS; return -1; }
         return old_openat64(fd, pathname, flags, mode);
     }
 
@@ -229,32 +233,40 @@ static int accessImpl(const char *pathname, int mode) {
     }
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT access %s -> %s", pathname, sigb_get_rep_path());
+        if (old_access == NULL) { errno = ENOSYS; return -1; }
         return old_access(sigb_get_rep_path(), mode);
     }
+    if (old_access == NULL) { errno = ENOSYS; return -1; }
     return old_access(pathname, mode);
 }
 
 static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT readlink %s -> %s", pathname, sigb_get_rep_path());
+        if (old_readlink == NULL) { errno = ENOSYS; return -1; }
         return old_readlink(sigb_get_rep_path(), buf, bufsiz);
     }
+    if (old_readlink == NULL) { errno = ENOSYS; return -1; }
     return old_readlink(pathname, buf, bufsiz);
 }
 
 static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT readlinkat %s -> %s", pathname, sigb_get_rep_path());
+        if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
         return old_readlinkat(dirfd, sigb_get_rep_path(), buf, bufsiz);
     }
+    if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
     return old_readlinkat(dirfd, pathname, buf, bufsiz);
 }
 
 static char *realpathImpl(const char *pathname, char *resolved_path) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT realpath %s -> %s", pathname, sigb_get_rep_path());
+        if (old_realpath == NULL) { errno = ENOSYS; return NULL; }
         return old_realpath(sigb_get_rep_path(), resolved_path);
     }
+    if (old_realpath == NULL) { errno = ENOSYS; return NULL; }
     return old_realpath(pathname, resolved_path);
 }
 
@@ -263,48 +275,60 @@ static char *realpathImpl(const char *pathname, char *resolved_path) {
 static int statImpl(const char *pathname, struct stat *st) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT stat %s -> %s", pathname, sigb_get_rep_path());
+        if (old_stat == NULL) { errno = ENOSYS; return -1; }
         return old_stat(sigb_get_rep_path(), st);
     }
+    if (old_stat == NULL) { errno = ENOSYS; return -1; }
     return old_stat(pathname, st);
 }
 
 static int lstatImpl(const char *pathname, struct stat *st) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT lstat %s -> %s", pathname, sigb_get_rep_path());
+        if (old_lstat == NULL) { errno = ENOSYS; return -1; }
         return old_lstat(sigb_get_rep_path(), st);
     }
+    if (old_lstat == NULL) { errno = ENOSYS; return -1; }
     return old_lstat(pathname, st);
 }
 
 static int stat64Impl(const char *pathname, struct stat64 *st) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT stat64 %s -> %s", pathname, sigb_get_rep_path());
+        if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
         return old_stat64(sigb_get_rep_path(), st);
     }
+    if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
     return old_stat64(pathname, st);
 }
 
 static int lstat64Impl(const char *pathname, struct stat64 *st) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT lstat64 %s -> %s", pathname, sigb_get_rep_path());
+        if (old_lstat64 == NULL) { errno = ENOSYS; return -1; }
         return old_lstat64(sigb_get_rep_path(), st);
     }
+    if (old_lstat64 == NULL) { errno = ENOSYS; return -1; }
     return old_lstat64(pathname, st);
 }
 
 static int statfsImpl(const char *pathname, struct statfs *st) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT statfs %s -> %s", pathname, sigb_get_rep_path());
+        if (old_statfs == NULL) { errno = ENOSYS; return -1; }
         return old_statfs(sigb_get_rep_path(), st);
     }
+    if (old_statfs == NULL) { errno = ENOSYS; return -1; }
     return old_statfs(pathname, st);
 }
 
 static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx) {
     if (sigb_resolve(pathname) != pathname) {
         XH_LOG_WARN("REDIRECT statx %s -> %s", pathname, sigb_get_rep_path());
+        if (old_statx == NULL) { errno = ENOSYS; return -1; }
         return old_statx(dirfd, sigb_get_rep_path(), flags, mask, stx);
     }
+    if (old_statx == NULL) { errno = ENOSYS; return -1; }
     return old_statx(dirfd, pathname, flags, mask, stx);
 }
 
@@ -312,6 +336,7 @@ static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int ma
 
 static FILE *fopenImpl(const char *pathname, const char *mode) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old_fopen == NULL) { errno = ENOSYS; return NULL; }
         return old_fopen(pathname, mode);
     }
 
@@ -333,11 +358,13 @@ static FILE *fopenImpl(const char *pathname, const char *mode) {
         XH_LOG_WARN("REDIRECT fopen %s -> %s", pathname, sigb_get_rep_path());
         return old_fopen(sigb_get_rep_path(), mode);
     }
+    if (old_fopen == NULL) { errno = ENOSYS; return NULL; }
     return old_fopen(pathname, mode);
 }
 
 static int __open_2Impl(const char *pathname, int flags) {
     if (!sigb_maybe_relevant(pathname)) {
+        if (old___open_2 == NULL) { errno = ENOSYS; return -1; }
         return old___open_2(pathname, flags);
     }
 
@@ -351,6 +378,7 @@ static int __open_2Impl(const char *pathname, int flags) {
         XH_LOG_WARN("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
         return old___open_2(sigb_get_rep_path(), flags);
     }
+    if (old___open_2 == NULL) { errno = ENOSYS; return -1; }
     return old___open_2(pathname, flags);
 }
 
@@ -398,11 +426,13 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
         return 0;
     }
     if (!sigb_is_normal() || callback == NULL) {
+        if (old_dl_iterate_phdr == NULL) { errno = ENOSYS; return 0; }
         return old_dl_iterate_phdr(callback, data);
     }
     struct DlIterateCtx ctx;
     ctx.callback = callback;
     ctx.data = data;
+    if (old_dl_iterate_phdr == NULL) { errno = ENOSYS; return 0; }
     return old_dl_iterate_phdr(sanitizedDlCallback, &ctx);
 }
 
@@ -489,7 +519,11 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
     }
 
     /* raw view: 原始 syscall 绕过 hook，拿到真实 base.apk 的 stat */
+#if defined(__LP64__)
     struct stat raw_st;
+#else
+    struct stat64 raw_st;   /* 32 位下 fstatat64 写入 64 位布局 */
+#endif
     memset(&raw_st, 0, sizeof(raw_st));
     if (syscall(SIGB_NR_STAT, AT_FDCWD, path, &raw_st, 0) == 0) {
         char raw_part[512];

@@ -110,11 +110,16 @@ Java_r_s_test_NativeDetector_probeStat(JNIEnv *env, jclass clazz, jstring jpath)
     } else {
         snprintf(out, sizeof(out), "normal: ERR errno=%d", errno);
     }
-    memset(&st, 0, sizeof(st));
-    if (syscall(RAW_STAT, AT_FDCWD, path, &st, 0) == 0) {
+#if defined(__LP64__)
+    struct stat raw_st;
+#else
+    struct stat64 raw_st;   /* 32 位下 fstatat64 写入 64 位布局 */
+#endif
+    memset(&raw_st, 0, sizeof(raw_st));
+    if (syscall(RAW_STAT, AT_FDCWD, path, &raw_st, 0) == 0) {
         char part[512];
         snprintf(part, sizeof(part), " | raw: dev=%lx ino=%lu size=%ld",
-                 (unsigned long)st.st_dev, (unsigned long)st.st_ino, (long)st.st_size);
+                 (unsigned long)raw_st.st_dev, (unsigned long)raw_st.st_ino, (long)raw_st.st_size);
         strncat(out, part, sizeof(out) - strlen(out) - 1);
     } else {
         strncat(out, " | raw: ERR", sizeof(out) - strlen(out) - 1);

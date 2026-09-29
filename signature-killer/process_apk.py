@@ -6,11 +6,14 @@ SignatureKiller 全自动管线
 """
 import argparse
 import datetime
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 
 WORK = "work_out"
 DECODED = os.path.join(WORK, "decoded")
@@ -65,33 +68,55 @@ def list_smali_dirs(decoded):
     return out
 
 
-def find_application_smali(smali_dirs, app_cls):
-    rel = app_cls.replace(".", "/") + ".smali"
-    for d in smali_dirs:
-        p = os.path.join(d, rel)
-        if os.path.exists(p):
-            return p
-    return None
+def get_apk_signature_md5(apk_path):
+    """从输入 APK 的 v1 签名块读证书 DER，返回与 Java X509Certificate.getEncoded() 一致的 MD5。"""
+    try:
+        with zipfile.ZipFile(apk_path) as z:
+            entry = None
+            for n in z.namelist():
+                if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I):
+                    entry = n
+                    break
+            if entry is None:
+                return None
+            data = z.read(entry)
+        fd, p7 = tempfile.mkstemp(suffix=".pkcs7")
+        os.close(fd)
+        with open(p7, "wb") as f:
+            f.write(data)
+        try:
+            r1 = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", p7,
+                                 "-print_certs", "-outform", "DER"], capture_output=True)
+            if r1.returncode != 0 or not r1.stdout:
+                return None
+            r2 = subprocess.run(["openssl", "x509", "-inform", "DER", "-outform", "DER"],
+                                input=r1.stdout, capture_output=True)
+            if r2.returncode != 0 or not r2.stdout:
+                return None
+            return hashlib.md5(r2.stdout).hexdigest()
+        finally:
+            os.unlink(p7)
+    except Exception as e:
+        print(f"[warn] 签名解析异常: {e}")
+        return None
 
 
-def inject_smali_init(smali_file):
-    with open(smali_file, encoding="utf-8") as f:
-        content = f.read()
-    marker = ".method protected onCreate(Landroid/os/Bundle;)V"
-    if marker not in content:
-        marker = ".method public onCreate(Landroid/os/Bundle;)V"
-    if marker not in content:
-        print(f"[warn] 未找到 onCreate，跳过注入 {smali_file}")
-        return
-    start = content.index(marker)
-    body_start = content.index("    ", start)
-    next_method = content.find(".method", start + 1)
-    end = next_method if next_method != -1 else len(content)
-    injection = "    invoke-static {p0}, Lr/s/sign/KillerApplication;->init(Landroid/content/Context;)V\n"
-    content = content[:body_start] + injection + content[body_start:end] + content[end:]
-    with open(smali_file, "w", encoding="utf-8") as f:
-        f.write(content)
-    print(f"[ok] injected init into {smali_file}")
+def patch_expected_signature(decoded, md5_hex):
+    old_str = "1fb11e8214ae8b8c259aa9cd87387ac0"
+    total = 0
+    for name in os.listdir(decoded):
+        d = os.path.join(decoded, name)
+        if not (re.fullmatch(r"smali(_classes\d+)?", name) and os.path.isdir(d)):
+            continue
+        p = os.path.join(d, "r/s/test/MainActivity.smali")
+        if not os.path.exists(p):
+            continue
+        s = open(p, encoding="utf-8").read()
+        cnt = s.count(old_str)
+        if cnt > 0:
+            open(p, "w", encoding="utf-8").write(s.replace(old_str, md5_hex))
+            total += cnt
+    return total
 
 
 def main():
@@ -155,7 +180,6 @@ def main():
         print(f"FAIL: {KILLER_SMALI} 不存在（先运行 prepare 生成 work_killer）")
         sys.exit(1)
 
-    # killer smali 固定进主 dex（Application 必须在 classes.dex，否则系统实例化前找不到类）
     smali_target = os.path.join(DECODED, "smali")
     os.makedirs(smali_target, exist_ok=True)
     smali_injected = 0
@@ -169,30 +193,33 @@ def main():
         smali_injected += 1
     print(f"[ok] killer smali 合并到主 dex {smali_target}（{smali_injected} 项）")
 
-    app_match = re.search(r'<application[^>]*android:name="([^"]+)"', manifest)
-    smali_dirs = list_smali_dirs(DECODED)
-    if app_match:
-        app_cls = app_match.group(1)
-        if app_cls.startswith("."):
-            app_cls = package + app_cls
-        elif app_cls.startswith("/"):
-            app_cls = app_cls[1:]
-        target = find_application_smali(smali_dirs, app_cls)
-        if target:
-            inject_smali_init(target)
-            print(f"[ok] 已注入 init 到原 Application: {app_cls} ({os.path.relpath(target, DECODED)})")
-        else:
-            new_manifest = re.sub(
-                r'(<application[^>]*android:name=")[^"]*(")',
-                r'\1r.s.sign.KillerApplication\2', manifest, count=1)
-            open(manifest_path, "w", encoding="utf-8").write(new_manifest)
-            print(f"[warn] 所有 dex 中均找不到 {app_cls}，android:name 替换为 KillerApplication")
+    # 动态签名期望值：替换 MainActivity.smali 里硬编码的 expected MD5
+    expected = get_apk_signature_md5(apk_path)
+    if expected:
+        n = patch_expected_signature(DECODED, expected)
+        print(f"[ok] 签名期望值已更新: {expected} ({n} 处)")
     else:
-        new_manifest = re.sub(r'<application\b([^>]*)>',
-                              r'<application\1 android:name="r.s.sign.KillerApplication">',
-                              manifest, count=1)
+        print("[warn] 无法解析输入 APK 的 v1 签名，跳过期望值替换（界面红蓝判断可能失真）")
+
+    # 注入 KillerProvider：进程启动早期执行 KillerApplication.init，
+    # 不依赖原 Application 是否存在 onCreate
+    manifest = open(manifest_path, encoding="utf-8").read()
+    provider = (
+        '<provider\n'
+        '            android:name="r.s.sign.KillerProvider"\n'
+        f'            android:authorities="{package}.killerprovider"\n'
+        '            android:enabled="true"\n'
+        '            android:exported="false" />'
+    )
+    new_manifest = re.sub(
+        r'(<application\b[^>]*?)(>)',
+        lambda mo: mo.group(1) + '\n        ' + provider + mo.group(2),
+        manifest, count=1, flags=re.S)
+    if new_manifest == manifest:
+        print("[warn] 未找到 <application> 标签，KillerProvider 注入失败")
+    else:
         open(manifest_path, "w", encoding="utf-8").write(new_manifest)
-        print("[ok] 无 Application，android:name -> r.s.sign.KillerApplication")
+        print(f"[ok] KillerProvider 已注入 (authorities={package}.killerprovider)")
 
     run(["java", "-jar", args.apktool, "b", DECODED, "-o", os.path.join(WORK, "unsigned.apk")])
     print("[ok] apktool b")

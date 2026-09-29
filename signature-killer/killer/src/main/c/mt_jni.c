@@ -18,6 +18,7 @@
 #include "xhook.h"
 #include "xh_log.h"
 #include "sigbypass_core.h"
+#include <dlfcn.h>
 
 /* ================= Step 4: path family ================= */
 static int (*old_access)(const char *, int);
@@ -52,6 +53,35 @@ static int (*old___open_2)(const char *, int);
 static FILE *fopenImpl(const char *pathname, const char *mode);
 static int __open_2Impl(const char *pathname, int flags);
 static int serve_sanitized_proc(const char *pathname);
+
+/* ================= Step 8.5: dlopen hooks -> 新加载 .so 自动刷新 ================= */
+
+static void *(*old_dlopen)(const char *, int);
+static void *(*old_android_dlopen_ext)(const char *, int, const void *);
+
+static void sigb_refresh_after_load(void) {
+    sigb_set_state(SIGB_STATE_REENTRY);
+    xhook_refresh(1);
+    sigb_set_state(SIGB_STATE_NORMAL);
+}
+
+static void *dlopenImpl(const char *filename, int flags) {
+    void *h = old_dlopen != NULL ? old_dlopen(filename, flags) : dlopen(filename, flags);
+    if (h != NULL) {
+        sigb_refresh_after_load();
+    }
+    return h;
+}
+
+static void *android_dlopen_extImpl(const char *filename, int flags, const void *extinfo) {
+    void *h = old_android_dlopen_ext != NULL
+              ? old_android_dlopen_ext(filename, flags, extinfo)
+              : android_dlopen_ext(filename, flags, extinfo);
+    if (h != NULL) {
+        sigb_refresh_after_load();
+    }
+    return h;
+}
 
 /* ================= Step 8: dl_iterate_phdr ================= */
 static int (*old_dl_iterate_phdr)(int (*)(struct dl_phdr_info *, size_t, void *), void *);
@@ -150,6 +180,8 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     (*env)->ReleaseStringUTFChars(env, repPath, rep_path);
 
     xhook_register(".*\\.so$", "openat64", openat64Impl, (void **) &old_openat64);
+    xhook_register(".*\\.so$", "dlopen", dlopenImpl, (void **) &old_dlopen);
+    xhook_register(".*\\.so$", "android_dlopen_ext", android_dlopen_extImpl, (void **) &old_android_dlopen_ext);
     xhook_register(".*\\.so$", "openat", openatImpl, (void **) &old_openat);
     xhook_register(".*\\.so$", "open64", open64Impl, (void **) &old_open64);
     xhook_register(".*\\.so$", "open", openImpl, (void **) &old_open);

@@ -25,6 +25,7 @@ import java.lang.reflect.Field;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Enumeration;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -32,6 +33,7 @@ import java.util.zip.ZipFile;
 public class KillerApplication extends Application {
     private static final String TAG = "KillerApp";
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
+    private static final AtomicBoolean sInitDone = new AtomicBoolean(false);
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
     @Override
@@ -48,6 +50,10 @@ public class KillerApplication extends Application {
     public static void init(Context context) {
         if (context == null) {
             Log.w(TAG, "init: null context");
+            return;
+        }
+        if (!sInitDone.compareAndSet(false, true)) {
+            Log.w(TAG, "init: already done, skip");
             return;
         }
         try {
@@ -275,4 +281,7 @@ public class KillerApplication extends Application {
     }
 
     private static native void hookApkPath(String apkPath, String repPath);
+
+    /** 刷新全部已加载 .so 的 hook：目标应用后续 loadLibrary 的检测库需要此入口 */
+    public static native void refreshHooks();
 }

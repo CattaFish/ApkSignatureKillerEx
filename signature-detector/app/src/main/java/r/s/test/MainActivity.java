@@ -190,8 +190,9 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < 4; i++) id |= (long) (pairs[off + 8 + i] & 0xff) << (8 * i);
                 off += 12;
                 if (pairLen < 4 || off + pairLen - 4 > (long) pairs.length) break;
-                if (id == 0x7109871aL) {
-                    return parseV2Signer(pairs, off, (int) (pairLen - 4));
+                if (id == 0x7109871aL || id == 0xf05368c0L) {
+                    byte[] der = parseApkSignerBlock(pairs, off, (int) (pairLen - 4));
+                    if (der != null) return der;
                 }
                 off += (int) (pairLen - 4);
             }
@@ -201,33 +202,60 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private byte[] parseV2Signer(byte[] block, int start, int len) {
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(block, start, len);
+    private byte[] parseApkSignerBlock(byte[] value, int start, int len) {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
             int signerCount = dis.readInt();
             if (signerCount <= 0 || signerCount > 16) return null;
-            int signerBytes = dis.readInt();
-            if (signerBytes <= 0 || signerBytes > len) return null;
-            byte[] signer = new byte[signerBytes];
-            dis.readFully(signer);
-            try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
-                 DataInputStream sdis = new DataInputStream(sb)) {
-                skipFully(sdis, sdis.readInt());
-                skipFully(sdis, sdis.readInt());
-                int certCount = sdis.readInt();
-                if (certCount <= 0 || certCount > 16) return null;
-                int certLen = sdis.readInt();
-                if (certLen <= 0 || certLen > 100000) return null;
-                byte[] der = new byte[certLen];
-                sdis.readFully(der);
-                X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
-                        .generateCertificate(new ByteArrayInputStream(der));
-                return cert.getEncoded();
+            while (signerCount-- > 0) {
+                int signerLen = dis.readInt();
+                if (signerLen <= 0 || signerLen > len - 4) return null;
+                byte[] signer = new byte[signerLen];
+                dis.readFully(signer);
+                byte[] der = extractCertFromSigner(signer);
+                if (der != null) return der;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    private byte[] extractCertFromSigner(byte[] signer) {
+        try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
+             DataInputStream sdis = new DataInputStream(sb)) {
+            int signedDataLen = sdis.readInt();
+            if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
+            byte[] signedData = new byte[signedDataLen];
+            sdis.readFully(signedData);
+            try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
+                 DataInputStream sdd = new DataInputStream(sd)) {
+                int digestsLen = sdd.readInt();
+                if (digestsLen < 0) return null;
+                skipFully(sdd, digestsLen);
+                int certsLen = sdd.readInt();
+                if (certsLen <= 0) return null;
+                byte[] certs = new byte[certsLen];
+                sdd.readFully(certs);
+                try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
+                     DataInputStream cd = new DataInputStream(cb)) {
+                    int certCount = cd.readInt();
+                    if (certCount <= 0 || certCount > 16) return null;
+                    int certLen = cd.readInt();
+                    if (certLen <= 0 || certLen > 100000) return null;
+                    byte[] der = new byte[certLen];
+                    cd.readFully(der);
+                    X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
+                            .generateCertificate(new ByteArrayInputStream(der));
+                    return cert.getEncoded();
+                }
             }
         } catch (Exception e) {
             return null;
         }
     }
+
+
 
     private static void skipFully(DataInputStream in, int n) throws java.io.IOException {
         long skipped = 0;

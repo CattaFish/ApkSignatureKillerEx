@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
             "/data/local/tmp", "/data/adb/"
     };
     private static final Pattern RE_INO = Pattern.compile("ino=(\\d+)");
-    private static final Pattern RE_MAP_INO = Pattern.compile("^[0-9a-f]+-[0-9a-f]+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+");
+    private static final Pattern RE_MAP_INO = Pattern.compile("\\s+(\\d+)\\s+(/[^\\s]+\\.apk)(?: \\(deleted\\))?$");
     private static final Pattern RE_MAP_SO = Pattern.compile("\\s(/[^\\s]+\\.so)(?: \\(deleted\\))?$");
 
         private String findRepPath() {
@@ -285,7 +285,8 @@ public class MainActivity extends Activity {
         boolean pass7;
         String ch7Mark;
         if (hasOrigin) {
-            pass7 = normApkIno > 0 && normApkIno == originIno && normSens == 0;
+            // 路径族 stat 已重定向(normalIno==originIno) + maps 无敏感词 => HOOKED
+            pass7 = normalIno > 0 && normalIno == originIno && normSens == 0;
             ch7Mark = pass7 ? "HOOKED" : "CHECK";
         } else {
             pass7 = dimensionSame;
@@ -293,7 +294,8 @@ public class MainActivity extends Activity {
         }
         int ch7Color = pass7 ? Color.BLUE : Color.RED;
         String ch7line = "norm_sens=" + normSens + " raw_sens=" + rawSens
-                + " inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
+                + " maps_inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
+                + " stat_ino(norm/raw)=" + normalIno + "/" + rawIno
                 + " dim_same:" + dimensionSame + " (" + ch7Mark + ")";
         appendProbe(sb, "ch7 maps: ", ch7line, ch7Color);
 

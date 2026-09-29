@@ -224,37 +224,33 @@ public class KillerApplication extends Application {
     }
 
     private static byte[] extractCertFromSigner(byte[] signer) {
-        try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
-             DataInputStream sdis = new DataInputStream(sb)) {
-            int signedDataLen = readLEInt(sdis);
+        // signer = signedData | signatures | publicKey（均为 length-prefixed）
+        // 直接搜索 X.509 标记（30 82 <len16>），不逐层猜字段
+        try {
+            int signedDataLen = readLEInt(new DataInputStream(new ByteArrayInputStream(signer)));
             if (signedDataLen <= 0 || signedDataLen > signer.length - 4) return null;
-            byte[] signedData = new byte[signedDataLen];
-            sdis.readFully(signedData);
-            try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
-                 DataInputStream sdd = new DataInputStream(sd)) {
-                int digestsLen = readLEInt(sdd);
-                if (digestsLen < 0 || digestsLen > signedData.length - 4) return null;
-                skipFully(sdd, digestsLen);
-                int certsLen = readLEInt(sdd);
-                if (certsLen <= 0 || certsLen > signedData.length - 4 - digestsLen) return null;
-                byte[] certs = new byte[certsLen];
-                sdd.readFully(certs);
-                try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
-                     DataInputStream cd = new DataInputStream(cb)) {
-                    // certificates = 长度前缀证书序列（无 count）
-                    int certLen = readLEInt(cd);
-                    if (certLen <= 0 || certLen > certs.length - 4) return null;
-                    byte[] der = new byte[certLen];
-                    cd.readFully(der);
-                    X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
-                            .generateCertificate(new ByteArrayInputStream(der));
-                    return cert.getEncoded();
+            byte[] sd = new byte[signedDataLen];
+            System.arraycopy(signer, 4, sd, 0, signedDataLen);
+            for (int i = 0; i + 4 <= sd.length; i++) {
+                if ((sd[i] & 0xff) == 0x30 && (sd[i + 1] & 0xff) == 0x82) {
+                    int certLen = ((sd[i + 2] & 0xff) << 8) | (sd[i + 3] & 0xff);
+                    int total = 4 + certLen;
+                    if (i + total <= sd.length && certLen > 40) {
+                        byte[] der = java.util.Arrays.copyOfRange(sd, i, i + total);
+                        try {
+                            X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
+                                    .generateCertificate(new ByteArrayInputStream(der));
+                            return cert.getEncoded();
+                        } catch (Exception ignored) {
+                        }
+                    }
                 }
             }
         } catch (Exception ignored) {
         }
         return null;
     }
+
 
     private static void skipFully(DataInputStream in, int n) throws IOException {
         long skipped = 0;

@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -291,51 +292,40 @@ public class MainActivity extends Activity {
     }
 
     private byte[] extractCertFromSigner(byte[] signer) {
-        try (ByteArrayInputStream sb = new ByteArrayInputStream(signer);
-             DataInputStream sdis = new DataInputStream(sb)) {
-            int signedDataLen = readLEInt(sdis);
+        // signer = signedData | signatures | publicKey（均为 length-prefixed）
+        // 不逐层猜测字段：直接搜索 X.509 证书标记（30 82 <len16> + 完整 ASN.1）
+        try {
+            int signedDataLen = readLEInt(new DataInputStream(new ByteArrayInputStream(signer)));
             if (signedDataLen <= 0 || signedDataLen > signer.length - 4) {
                 v2LastError = "bad signedDataLen=" + signedDataLen;
                 return null;
             }
-            byte[] signedData = new byte[signedDataLen];
-            sdis.readFully(signedData);
-            try (ByteArrayInputStream sd = new ByteArrayInputStream(signedData);
-                 DataInputStream sdd = new DataInputStream(sd)) {
-                int digestsLen = readLEInt(sdd);
-                if (digestsLen < 0 || digestsLen > signedData.length - 4) {
-                    v2LastError = "bad digestsLen=" + digestsLen;
-                    return null;
-                }
-                skipFully(sdd, digestsLen);
-                int certsLen = readLEInt(sdd);
-                if (certsLen <= 0 || certsLen > signedData.length - 4 - digestsLen) {
-                    v2LastError = "bad certsLen=" + certsLen;
-                    return null;
-                }
-                byte[] certs = new byte[certsLen];
-                sdd.readFully(certs);
-                try (ByteArrayInputStream cb = new ByteArrayInputStream(certs);
-                     DataInputStream cd = new DataInputStream(cb)) {
-                    // 关键：certificates = 长度前缀的证书序列（无 count 字段）
-                    int certLen = readLEInt(cd);
-                    if (certLen <= 0 || certLen > certs.length - 4) {
-                        v2LastError = "bad certLen=" + certLen;
-                        return null;
+            byte[] sd = new byte[signedDataLen];
+            System.arraycopy(signer, 4, sd, 0, signedDataLen);
+            for (int i = 0; i + 4 <= sd.length; i++) {
+                if ((sd[i] & 0xff) == 0x30 && (sd[i + 1] & 0xff) == 0x82) {
+                    int certLen = ((sd[i + 2] & 0xff) << 8) | (sd[i + 3] & 0xff);
+                    int total = 4 + certLen;
+                    if (i + total <= sd.length && certLen > 40) {
+                        byte[] der = Arrays.copyOfRange(sd, i, i + total);
+                        try {
+                            X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
+                                    .generateCertificate(new ByteArrayInputStream(der));
+                            v2LastError = "ok cert@" + i + " len=" + total;
+                            return cert.getEncoded();
+                        } catch (Exception ignore) {
+                            // 30 82 但解码失败，继续找下一个
+                        }
                     }
-                    byte[] der = new byte[certLen];
-                    cd.readFully(der);
-                    X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X509")
-                            .generateCertificate(new ByteArrayInputStream(der));
-                    v2LastError = "ok certLen=" + certLen;
-                    return cert.getEncoded();
                 }
             }
+            v2LastError = "X.509 cert not found in signedData";
         } catch (Exception e) {
             v2LastError = "extractCert: " + e.toString();
-            return null;
         }
+        return null;
     }
+
 
 
     private String getAPKPackageName() {

@@ -135,13 +135,20 @@ def get_apk_signature_md5(apk_path):
                         return None
                     signer = value[4:4 + signer_len]
                     signed_len = struct.unpack_from("<I", signer, 0)[0]
+                    if signed_len <= 0 or signed_len > len(signer) - 4:
+                        return None
                     signed = signer[4:4 + signed_len]
-                    digests_len = struct.unpack_from("<I", signed, 0)[0]
-                    certs_len = struct.unpack_from("<I", signed, 4 + digests_len)[0]
-                    certs = signed[8 + digests_len:8 + digests_len + certs_len]
-                    cert_len = struct.unpack_from("<I", certs, 0)[0]
-                    cert_der = certs[4:4 + cert_len]
-                    return hashlib.md5(cert_der).hexdigest()
+                    # 搜索 X.509 标记 30 82 <len16>，不逐层解析
+                    i = 0
+                    while i + 4 <= len(signed):
+                        if signed[i] == 0x30 and signed[i + 1] == 0x82:
+                            cert_len = (signed[i + 2] << 8) | signed[i + 3]
+                            total = 4 + cert_len
+                            if i + total <= len(signed) and cert_len > 40:
+                                cert_der = signed[i:i + total]
+                                return hashlib.md5(cert_der).hexdigest()
+                        i += 1
+                    return None
                 except Exception:
                     return None
             off += int(pair_len - 4)

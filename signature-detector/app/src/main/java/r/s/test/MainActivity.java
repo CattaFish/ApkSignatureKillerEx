@@ -336,18 +336,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static void skipFully(DataInputStream in, int n) throws java.io.IOException {
-        long skipped = 0;
-        while (skipped < n) {
-            long s = in.skip((long) n - skipped);
-            if (s <= 0) {
-                if (in.read() == -1) throw new java.io.IOException("EOF");
-                skipped++;
-            } else {
-                skipped += s;
-            }
-        }
-    }
 
     private String getAPKPackageName() {
         return getApplicationContext().getPackageName();

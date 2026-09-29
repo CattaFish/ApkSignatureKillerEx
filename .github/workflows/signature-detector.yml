@@ -1,0 +1,51 @@
+name: Build Signature Detector APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'signature-detector/**'
+      - '.github/workflows/signature-detector.yml'
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - 'signature-detector/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Accept licenses and install NDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.11902837" "platforms;android-34" "build-tools;34.0.0" >/dev/null || true
+
+      - name: Ensure origin.jks exists
+        run: |
+          if [ ! -f "signature-detector/origin.jks" ]; then
+            keytool -genkeypair -v -keystore signature-detector/origin.jks -alias key0 \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass 123456 -keypass 123456 \
+              -dname "CN=Android, O=Android, C=US"
+          fi
+
+      - name: Build debug APK
+        working-directory: signature-detector
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: detector-apk
+          path: signature-detector/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

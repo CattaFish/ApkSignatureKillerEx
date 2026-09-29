@@ -1,0 +1,38 @@
+name: Build Signature Killer
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'signature-killer/**'
+      - '.github/workflows/signature-killer.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Accept licenses and install NDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.11902837" "platforms;android-34" "build-tools;34.0.0" >/dev/null || true
+
+      - name: Build killer AAR
+        working-directory: signature-killer
+        run: ./gradlew :killer:assembleRelease --stacktrace
+
+      - name: Upload AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: killer-aar
+          path: signature-killer/killer/build/outputs/aar/*.aar
+          retention-days: 14

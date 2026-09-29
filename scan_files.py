@@ -5,7 +5,7 @@ def scan_and_merge():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     # 目标定位到 app/zzz 这一级，这样就能涵盖【上一级】和【src同级】
     target_root = os.path.normpath(os.path.join(base_dir, "."))
-    output_file = os.path.join(base_dir, "merged_zzz.txt")
+    output_file = os.path.join(base_dir, "merged_signkiller.txt")
 
     # 2. 定义规则
     text_extensions = {'.js', '.kt', '.java', '.xml', '.gradle', '.md', '.pro', '.cpp', '.h', '.proto', '.properties', '.yml', '.c', '.txt', '.py'}

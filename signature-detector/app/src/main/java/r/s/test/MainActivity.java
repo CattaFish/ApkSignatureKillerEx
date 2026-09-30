@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v5-20260930";
+    private static final String BUILD_TAG = "v6-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -457,21 +457,32 @@ public class MainActivity extends Activity {
 
     
     private String resolveExpectedSignature() {
-        File rep = new File(getApplicationInfo().dataDir, "signed.apk");
-        if (rep.isFile() && rep.length() > 0) {
-            byte[] sig = signatureFromApkFile(rep);
-            if (sig != null) {
-                String resolved = md5(sig);
-                Log.i("SigDetector", "Dynamic Expected (signed.apk)=" + resolved);
-                return resolved;
-            }
-        }
+        byte[] selfSig = null;
         try {
-            byte[] self = signatureFromAPI();
-            if (self != null) return md5(self);
+            selfSig = signatureFromAPI();
         } catch (Throwable ignored) {
         }
-        return "1fb11e8214ae8b8c259aa9cd87387ac0";
+        byte[] repSig = null;
+        File rep = new File(getApplicationInfo().dataDir, "signed.apk");
+        if (rep.isFile() && rep.length() > 0) {
+            repSig = signatureFromApkFile(rep);
+        }
+        byte[] expected;
+        if (repSig != null && selfSig != null && MessageDigest.isEqual(repSig, selfSig)) {
+            // killer 生效：API 注入签名 == 内嵌 input 签名（唯一可信场景）
+            expected = repSig;
+        } else if (selfSig != null) {
+            // 干净安装，或 signed.apk 为旧安装残留：以当前安装为准
+            expected = selfSig;
+        } else if (repSig != null) {
+            expected = repSig;
+        } else {
+            return "1fb11e8214ae8b8c259aa9cd87387ac0";
+        }
+        String resolved = md5(expected);
+        Log.i("SigDetector", "Dynamic Expected=" + resolved
+                + " (signed.apk " + (repSig != null ? "present" : "absent") + ")");
+        return resolved;
     }
 
     private byte[] signatureFromApkFile(File apkFile) {

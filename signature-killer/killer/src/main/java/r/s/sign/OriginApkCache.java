@@ -40,8 +40,9 @@ public final class OriginApkCache {
         if (dataDir == null) return null;
         File target = new File(dataDir, TARGET_NAME);
 
-        // 快路径：sidecar 命中直接复用
-        if (isValidCached(target)) {
+        long assetCrc = getAssetCrc(context);
+        // 快路径：sidecar 命中且 CRC 与当前内嵌 input 一致才复用
+        if (isValidCached(target, assetCrc)) {
             return target.getAbsolutePath();
         }
 
@@ -73,7 +74,7 @@ public final class OriginApkCache {
             }
 
             try {
-                if (isValidCached(target)) {
+                if (isValidCached(target, assetCrc)) {
                     return target.getAbsolutePath();
                 }
 
@@ -106,7 +107,7 @@ public final class OriginApkCache {
                     return null;
                 }
 
-                writeVerifiedSidecar(target);
+                writeVerifiedSidecar(target, assetCrc);
                 markReadOnly(target);
                 return target.getAbsolutePath();
             } finally {
@@ -123,14 +124,24 @@ public final class OriginApkCache {
         }
     }
 
-    private static boolean isValidCached(File target) {
+    private static long getAssetCrc(Context context) {
+        try (ZipFile zip = new ZipFile(context.getPackageResourcePath())) {
+            ZipEntry entry = zip.getEntry(ASSET_PATH);
+            return entry != null ? entry.getCrc() : 0;
+        } catch (IOException e) {
+            Log.w(TAG, "getAssetCrc failed", e);
+            return 0;
+        }
+    }
+
+    private static boolean isValidCached(File target, long expectedCrc) {
         if (target == null || !target.isFile() || target.length() <= 0) {
             return false;
         }
         try {
             long mtime = target.lastModified();
             long size = target.length();
-            String expected = mtime + ":" + size;
+            String expected = expectedCrc + ":" + mtime + ":" + size;
 
             File verified = new File(target.getParentFile(), TARGET_NAME + VERIFIED_SUFFIX);
             if (verified.isFile()) {
@@ -146,7 +157,7 @@ public final class OriginApkCache {
         if (!isZipWithManifest(target)) {
             return false;
         }
-        writeVerifiedSidecar(target);
+        writeVerifiedSidecar(target, expectedCrc);
         markReadOnly(target);
         return true;
     }
@@ -161,9 +172,9 @@ public final class OriginApkCache {
         }
     }
 
-    private static void writeVerifiedSidecar(File target) {
+    private static void writeVerifiedSidecar(File target, long crc) {
         try {
-            String stamp = target.lastModified() + ":" + target.length();
+            String stamp = crc + ":" + target.lastModified() + ":" + target.length();
             File verified = new File(target.getParentFile(), TARGET_NAME + VERIFIED_SUFFIX);
             java.nio.file.Files.write(verified.toPath(),
                     stamp.getBytes(java.nio.charset.StandardCharsets.UTF_8),

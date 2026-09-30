@@ -515,6 +515,31 @@ def main():
         print("FAIL: 未找到 $ANDROID_HOME/build-tools，请设置 ANDROID_HOME")
         sys.exit(1)
 
+    zipalign, _apksigner = find_build_tools()
+    if not zipalign:
+        print("FAIL: 未找到 $ANDROID_HOME/build-tools，请设置 ANDROID_HOME")
+        sys.exit(1)
+
+    # V1 壳三件套：原证书 + 空 MF/SF（V1 校验必然失败；V2 由自研签名器生成）
+    import zipfile as _zi
+    with _zi.ZipFile(apk_path) as _z:
+        _certs = [n for n in _z.namelist()
+                  if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I)]
+        _cert_data = _z.read(_certs[0]) if _certs else b""
+    _tmp = os.path.join(WORK, "unsigned_v1.apk")
+    with _zi.ZipFile(os.path.join(WORK, "unsigned.apk"), "r") as _zin, \
+         _zi.ZipFile(_tmp, "w") as _zout:
+        for _item in _zin.infolist():
+            _zout.writestr(_item, _zin.read(_item.filename))
+        _zout.writestr("META-INF/MANIFEST.MF",
+                       "Manifest-Version: 1.0\r\nCreated-By: custom\r\n\r\n")
+        _zout.writestr("META-INF/CERT.SF",
+                       "Signature-Version: 1.0\r\nCreated-By: custom\r\n\r\n")
+        if _cert_data:
+            _zout.writestr("META-INF/CERT.RSA", _cert_data)
+    os.replace(_tmp, os.path.join(WORK, "unsigned.apk"))
+    print("[ok] V1 壳三件套注入（原证书 + 空 MF/SF）")
+
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     aligned = os.path.join(WORK, "aligned.apk")
     processed = os.path.join(WORK, f"processed_{ts}.apk")
@@ -525,13 +550,6 @@ def main():
          "--key", _k, "--cert", _c, "--pub", _p])
     print("[ok] V2 签名完成（V1 文件保留为无效壳）")
 
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    aligned = os.path.join(WORK, "aligned.apk")
-    processed = os.path.join(WORK, f"processed_{ts}.apk")
-    run([zipalign, "-f", "4", os.path.join(WORK, "unsigned.apk"), aligned])
-    print("[ok] 签名完成")
-    print()
-    print("输出: " + os.path.abspath(processed))
     print("预期: From API/APK 蓝, From SVC 红, ch4 蓝, ch5/ch7/ch9 HOOKED/FILTERED")
 
 

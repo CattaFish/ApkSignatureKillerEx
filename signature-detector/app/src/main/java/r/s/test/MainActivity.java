@@ -531,7 +531,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void experimentRedirectSourceDirToSignedApk(Context ctx) {
+    private static void experimentRedirectSourceDirToSignedApk(Context ctx) {
         try {
             File apk = new File(ctx.getApplicationInfo().dataDir, "signed.apk");
             if (!apk.isFile() || apk.length() <= 0) {

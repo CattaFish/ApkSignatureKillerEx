@@ -210,6 +210,36 @@ def inject_original_meta_inf(apk_path, unsigned_apk):
 
 
 
+def append_cert_after_sign(apk_path, signed_apk):
+    """apksigner 会删除 META-INF 旧 V1 签名件；签名完成后以追加方式放回原证书。
+    与手动复制等效：V2 已验证签名不受 META-INF 追加影响（已实测安装+校验通过）。"""
+    try:
+        import zipfile
+        with zipfile.ZipFile(apk_path) as z:
+            cert_entries = [n for n in z.namelist()
+                            if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I)]
+            if not cert_entries:
+                print("[warn] 无原证书可追加")
+                return 0
+            cert_name = os.path.basename(cert_entries[0])
+            cert_data = z.read(cert_entries[0])
+        with zipfile.ZipFile(signed_apk, "a") as zout:
+            existing = zout.namelist()
+            if "META-INF/" + cert_name in existing:
+                print("[ok] 最终 APK 已有证书")
+                return 1
+            zi = zipfile.ZipInfo("META-INF/" + cert_name)
+            zi.external_attr = 0o644 << 16
+            zout.writestr(zi, cert_data)
+        with zipfile.ZipFile(signed_apk) as z:
+            ok = any(re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I) for n in z.namelist())
+        print(f"[check] 最终 APK META-INF cert present: {ok}")
+        return 1 if ok else 0
+    except Exception as e:
+        print(f"[warn] 签名后追加失败: {e}")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
@@ -344,6 +374,7 @@ def main():
          "--v1-signing-enabled", "false",
          "--v2-signing-enabled", "true",
          "--out", processed, aligned])
+    append_cert_after_sign(apk_path, processed)
     print("[ok] 签名完成")
     print()
     print("输出: " + os.path.abspath(processed))

@@ -45,6 +45,7 @@ public class KillerApplication extends Application {
     private static final Map<String, Signature[]> sSignatureCache = new ConcurrentHashMap<>();
     private static final Set<String> sSignatureMisses = new HashSet<>();
     private static byte[] sPmExpectedCert;
+    private static String sRedirectApkPath;
     private static final AtomicBoolean sPmProxyInstalled = new AtomicBoolean(false);
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
@@ -85,6 +86,11 @@ public class KillerApplication extends Application {
             Log.w(TAG, "init: sig=" + (signatureBytes != null ? signatureBytes.length : "null"));
             if (signatureBytes != null) {
                 try {
+                    try {
+                        File repFile = new File(context.getDataDir(), "signed.apk");
+                        if (repFile.isFile()) sRedirectApkPath = repFile.getAbsolutePath();
+                    } catch (Throwable ignored) {
+                    }
                     cacheOriginalSignature(packageName, signatureBytes);
                     killPM(packageName);
                     installPmProxy(context);
@@ -265,6 +271,11 @@ public class KillerApplication extends Application {
             sSignatureCache.put(packageName, sigs);
             sSignatureMisses.remove(packageName);
             sPmExpectedCert = signatureBytes;
+            try {
+                File repFile = new File(context.getDataDir(), "signed.apk");
+                if (repFile.isFile()) sRedirectApkPath = repFile.getAbsolutePath();
+            } catch (Throwable ignored) {
+            }
         } catch (Throwable e) {
             Log.w(TAG, "cacheOriginalSignature failed for " + packageName, e);
         }
@@ -293,6 +304,18 @@ public class KillerApplication extends Application {
         for (int i = 0; i < count; i++) {
             target[i] = replacements[i] == null ? null : new Signature(replacements[i].toByteArray());
         }
+    }
+
+    private static void replaceAppInfoPaths(PackageInfo packageInfo) {
+        if (packageInfo == null || sRedirectApkPath == null) return;
+        ApplicationInfo ai = packageInfo.applicationInfo;
+        if (ai == null) return;
+        ai.sourceDir = sRedirectApkPath;
+        ai.publicSourceDir = sRedirectApkPath;
+        setPathField(ai, "scanSourceDir", sRedirectApkPath);
+        setPathField(ai, "scanPublicSourceDir", sRedirectApkPath);
+        setPathField(ai, "baseCodePath", sRedirectApkPath);
+        setPathField(ai, "baseResourcePath", sRedirectApkPath);
     }
 
     private static void replacePackageSignatures(String packageName, PackageInfo packageInfo) {
@@ -352,6 +375,8 @@ public class KillerApplication extends Application {
             }
         } catch (Throwable e) {
             Log.w(TAG, "deep mSigningDetails replace failed for " + packageName, e);
+
+        replaceAppInfoPaths(packageInfo);
         }
     }
 
@@ -390,6 +415,11 @@ public class KillerApplication extends Application {
                         @Override
                         public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
                             String name = method.getName();
+                            if (("getPackageInfo".equals(name) || "getApplicationInfo".equals(name))
+                                    && ret instanceof PackageInfo && selfPkg.equals(args[0])) {
+                                replaceAppInfoPaths((PackageInfo) ret);
+                                replacePackageSignatures(selfPkg, (PackageInfo) ret);
+                            }
                             if ("hasSigningCertificate".equals(name)
                                     && args != null && args.length >= 3
                                     && args[0] instanceof String
@@ -401,7 +431,8 @@ public class KillerApplication extends Application {
                                     return Boolean.TRUE;
                                 }
                             }
-                            return method.invoke(orig, args);
+                            Object ret = method.invoke(orig, args);
+                            return ret;
                         }
                     });
             mPmField.set(pm, proxy);

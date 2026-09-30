@@ -406,10 +406,9 @@ public class KillerApplication extends Application {
                         @Override
                         public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
                             String name = method.getName();
-                            Object ret = null;
                             boolean isGetPkgInfo = ("getPackageInfo".equals(name) || "getApplicationInfo".equals(name));
                             if (isGetPkgInfo) {
-                                ret = method.invoke(orig, args);
+                                Object ret = method.invoke(orig, args);
                                 if (ret instanceof PackageInfo
                                         && args != null && args.length > 0
                                         && args[0] instanceof String
@@ -431,6 +430,7 @@ public class KillerApplication extends Application {
                                 }
                             }
                             return method.invoke(orig, args);
+                        }
                     });
             mPmField.set(pm, proxy);
             try {

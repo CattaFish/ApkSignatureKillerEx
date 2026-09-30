@@ -30,6 +30,10 @@ import java.security.cert.X509Certificate;
 import java.util.Enumeration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -37,6 +41,8 @@ public class KillerApplication extends Application {
     private static final String TAG = "KillerApp";
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
     private static final AtomicBoolean sInitDone = new AtomicBoolean(false);
+    private static final Map<String, Signature[]> sSignatureCache = new ConcurrentHashMap<>();
+    private static final Set<String> sSignatureMisses = new HashSet<>();
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
     @Override
@@ -67,16 +73,17 @@ public class KillerApplication extends Application {
                 Log.w(TAG, "init: dataFile null");
                 return;
             }
-            File repFile = new File(dataFile, "signed.apk");
-            extractOriginApk(context, repFile);
-            Log.w(TAG, "init: origin exists=" + repFile.exists() + " len=" + repFile.length());
-            if (!repFile.exists()) return;
+            String originPath = OriginApkCache.prepare(context);
+            File repFile = originPath != null ? new File(originPath) : null;
+            Log.w(TAG, "init: origin exists=" + (repFile != null && repFile.exists()) + " len=" + (repFile != null ? repFile.length() : 0));
+            if (repFile == null || !repFile.exists()) return;
 
             byte[] signatureBytes = readSignatureFromApk(repFile);
             Log.w(TAG, "init: sig=" + (signatureBytes != null ? signatureBytes.length : "null"));
             if (signatureBytes != null) {
                 try {
-                    killPM(packageName, signatureBytes);
+                    cacheOriginalSignature(packageName, signatureBytes);
+                    killPM(packageName);
                     Log.w(TAG, "init: killPM done");
                 } catch (Throwable t) {
                     Log.e(TAG, "init: killPM threw", t);
@@ -94,20 +101,8 @@ public class KillerApplication extends Application {
     }
 
     private static void extractOriginApk(Context context, File repFile) {
-        try {
-            if (repFile.exists() && repFile.length() > 0) return;
-            InputStream is = context.getAssets().open("SignedByRS/input.apk");
-            if (is == null) return;
-            File parent = repFile.getParentFile();
-            if (parent != null && !parent.exists()) parent.mkdirs();
-            try (OutputStream os = new FileOutputStream(repFile)) {
-                byte[] buf = new byte[102400];
-                int len;
-                while ((len = is.read(buf)) != -1) os.write(buf, 0, len);
-            }
-            is.close();
-        } catch (IOException ignored) {
-        }
+        // 由 OriginApkCache.prepare() 接管；此方法保留仅为兼容旧调用。
+        OriginApkCache.prepare(context);
     }
 
     private static int readLEInt(DataInputStream in) throws IOException {
@@ -253,25 +248,106 @@ public class KillerApplication extends Application {
 
 
 
-    private static void killPM(String packageName, byte[] signatureBytes) {
-        Signature fakeSignature = new Signature(signatureBytes);
+    private static void cacheOriginalSignature(String packageName, byte[] signatureBytes) {
+        if (packageName == null || signatureBytes == null) return;
+        try {
+            Signature[] sigs = new Signature[]{new Signature(signatureBytes)};
+            sSignatureCache.put(packageName, sigs);
+            sSignatureMisses.remove(packageName);
+        } catch (Throwable e) {
+            Log.w(TAG, "cacheOriginalSignature failed for " + packageName, e);
+        }
+    }
+
+    private static Signature[] getOriginalSignatures(String packageName) {
+        if (packageName == null) return null;
+        Signature[] cached = sSignatureCache.get(packageName);
+        if (cached != null) return cached;
+        sSignatureMisses.add(packageName);
+        return null;
+    }
+
+    private static Signature[] cloneSignatures(Signature[] signatures) {
+        if (signatures == null) return null;
+        Signature[] cloned = new Signature[signatures.length];
+        for (int i = 0; i < signatures.length; i++) {
+            cloned[i] = signatures[i] == null ? null : new Signature(signatures[i].toByteArray());
+        }
+        return cloned;
+    }
+
+    private static void replaceSignatureArray(Signature[] target, Signature[] replacements) {
+        if (target == null || replacements == null) return;
+        int count = Math.min(target.length, replacements.length);
+        for (int i = 0; i < count; i++) {
+            target[i] = replacements[i] == null ? null : new Signature(replacements[i].toByteArray());
+        }
+    }
+
+    private static void replacePackageSignatures(String packageName, PackageInfo packageInfo) {
+        if (packageInfo == null || packageName == null) return;
+        if (!packageName.equals(packageInfo.packageName)) return;
+        Signature[] replacements = getOriginalSignatures(packageName);
+        if (replacements == null || replacements.length == 0) return;
+
+        // 1) legacy signatures array: replace every element
+        if (packageInfo.signatures != null && packageInfo.signatures.length > 0) {
+            packageInfo.signatures = cloneSignatures(replacements);
+        }
+
+        // 2) signingInfo: apkContentsSigners + certificate history (API 28+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && packageInfo.signingInfo != null) {
+            try {
+                Signature[] contents = packageInfo.signingInfo.getApkContentsSigners();
+                if (contents != null && contents.length > 0) {
+                    replaceSignatureArray(contents, replacements);
+                }
+                Signature[] history = packageInfo.signingInfo.getSigningCertificateHistory();
+                if (history != null && history.length > 0) {
+                    replaceSignatureArray(history, replacements);
+                }
+            } catch (Throwable e) {
+                Log.w(TAG, "replace signingInfo failed for " + packageName, e);
+            }
+        }
+
+        // 3) deep: mSigningDetails internal arrays (reflection, best-effort)
+        try {
+            Object signingInfo = packageInfo.signingInfo;
+            if (signingInfo != null) {
+                Object details = findField(signingInfo.getClass(), "mSigningDetails").get(signingInfo);
+                if (details != null) {
+                    try {
+                        Object past = findField(details.getClass(), "pastSigningCertificates").get(details);
+                        if (past instanceof Signature[] pastArr && pastArr.length > 0) {
+                            replaceSignatureArray(pastArr, replacements);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        Object cur = findField(details.getClass(), "signatures").get(details);
+                        if (cur instanceof Signature[] curArr && curArr.length > 0) {
+                            replaceSignatureArray(curArr, replacements);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "deep mSigningDetails replace failed for " + packageName, e);
+        }
+    }
+
+    private static void killPM(String packageName) {
         Parcelable.Creator<PackageInfo> originalCreator = PackageInfo.CREATOR;
         Parcelable.Creator<PackageInfo> creator = new Parcelable.Creator<PackageInfo>() {
             @Override
             public PackageInfo createFromParcel(Parcel source) {
                 PackageInfo packageInfo = originalCreator.createFromParcel(source);
-                if (packageInfo.packageName.equals(packageName)) {
-                    if (packageInfo.signatures != null && packageInfo.signatures.length > 0) {
-                        packageInfo.signatures[0] = fakeSignature;
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        if (packageInfo.signingInfo != null) {
-                            Signature[] signaturesArray = packageInfo.signingInfo.getApkContentsSigners();
-                            if (signaturesArray != null && signaturesArray.length > 0) {
-                                signaturesArray[0] = fakeSignature;
-                            }
-                        }
-                    }
+                try {
+                    replacePackageSignatures(packageName, packageInfo);
+                } catch (Throwable t) {
+                    Log.w(TAG, "createFromParcel replace failed", t);
                 }
                 return packageInfo;
             }

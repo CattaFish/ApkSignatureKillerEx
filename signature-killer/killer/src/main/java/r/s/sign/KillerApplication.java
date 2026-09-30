@@ -319,15 +319,21 @@ public class KillerApplication extends Application {
                 if (details != null) {
                     try {
                         Object past = findField(details.getClass(), "pastSigningCertificates").get(details);
-                        if (past instanceof Signature[] pastArr && pastArr.length > 0) {
-                            replaceSignatureArray(pastArr, replacements);
+                        if (past instanceof Signature[]) {
+                            Signature[] pastArr = (Signature[]) past;
+                            if (pastArr.length > 0) {
+                                replaceSignatureArray(pastArr, replacements);
+                            }
                         }
                     } catch (Throwable ignored) {
                     }
                     try {
                         Object cur = findField(details.getClass(), "signatures").get(details);
-                        if (cur instanceof Signature[] curArr && curArr.length > 0) {
-                            replaceSignatureArray(curArr, replacements);
+                        if (cur instanceof Signature[]) {
+                            Signature[] curArr = (Signature[]) cur;
+                            if (curArr.length > 0) {
+                                replaceSignatureArray(curArr, replacements);
+                            }
                         }
                     } catch (Throwable ignored) {
                     }

@@ -176,6 +176,40 @@ def patch_expected_signature(decoded, md5_hex):
     return total
 
 
+def inject_original_meta_inf(decoded, apk_path):
+    """把原始 APK 的 META-INF V1 证书放进解码目录。
+    native 校验（cons.syscall 之类）从外层 base.apk 的 META-INF/*.RSA 解析证书，
+    重打包后仅 V2 签名时该文件原样保留，从而让 native 读到原证书。"""
+    try:
+        import zipfile
+        with zipfile.ZipFile(apk_path) as z:
+            cert_entries = [n for n in z.namelist()
+                            if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I)]
+            if not cert_entries:
+                print("[warn] 原包无 META-INF V1 证书，跳过注入")
+                return 0
+            meta_dir = os.path.join(decoded, "META-INF")
+            os.makedirs(meta_dir, exist_ok=True)
+            # 清理 apktool 可能保留的旧签名件，避免干扰
+            for old in os.listdir(meta_dir):
+                if re.match(r".*\.(RSA|DSA|EC|SF|MF)$", old, re.I):
+                    try:
+                        os.remove(os.path.join(meta_dir, old))
+                    except OSError:
+                        pass
+            injected = 0
+            for entry in cert_entries:
+                name = os.path.basename(entry)
+                with open(os.path.join(meta_dir, name), "wb") as f:
+                    f.write(z.read(entry))
+                injected += 1
+                print(f"[ok] META-INF/{name} <- 原证书")
+            return injected
+    except Exception as e:
+        print(f"[warn] META-INF 注入失败: {e}")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
@@ -284,6 +318,9 @@ def main():
         open(manifest_path, "w", encoding="utf-8").write(new_manifest)
         print(f"[ok] KillerProvider 已注入 (authorities={package}.killerprovider)")
 
+    # 原证书注入：native 从外层 APK META-INF 解析原签名
+    inject_original_meta_inf(DECODED, apk_path)
+
     run(["java", "-jar", args.apktool, "b", DECODED, "-o", os.path.join(WORK, "unsigned.apk")])
     print("[ok] apktool b")
 
@@ -301,6 +338,8 @@ def main():
          "--ks-key-alias", KEY_ALIAS,
          "--ks-pass", f"pass:{STORE_PASS}",
          "--key-pass", f"pass:{STORE_PASS}",
+         "--v1-signing-enabled", "false",
+         "--v2-signing-enabled", "true",
          "--out", processed, aligned])
     print("[ok] 签名完成")
     print()

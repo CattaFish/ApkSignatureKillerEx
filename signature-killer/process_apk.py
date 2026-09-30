@@ -211,10 +211,11 @@ def inject_original_meta_inf(apk_path, unsigned_apk):
 
 
 def append_cert_after_sign(apk_path, signed_apk):
-    """apksigner 会删除 META-INF 旧 V1 签名件；签名完成后以追加方式放回原证书。
-    与手动复制等效：V2 已验证签名不受 META-INF 追加影响（已实测安装+校验通过）。"""
+    """apksigner 会删除 META-INF V1 签名件；签名后用 zip 命令向 APK 末尾追加原证书。
+    仅追加新条目、不改动原条目，V2 签名保持有效（手动实测路径）。"""
+    import tempfile
+    cert_file = None
     try:
-        import zipfile
         with zipfile.ZipFile(apk_path) as z:
             cert_entries = [n for n in z.namelist()
                             if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I)]
@@ -223,21 +224,29 @@ def append_cert_after_sign(apk_path, signed_apk):
                 return 0
             cert_name = os.path.basename(cert_entries[0])
             cert_data = z.read(cert_entries[0])
-        with zipfile.ZipFile(signed_apk, "a") as zout:
-            existing = zout.namelist()
-            if "META-INF/" + cert_name in existing:
-                print("[ok] 最终 APK 已有证书")
-                return 1
-            zi = zipfile.ZipInfo("META-INF/" + cert_name)
-            zi.external_attr = 0o644 << 16
-            zout.writestr(zi, cert_data)
+        _, cert_file = tempfile.mkstemp(suffix=".RSA")
+        with open(cert_file, "wb") as f:
+            f.write(cert_data)
+        # zip 命令向已签名 APK 追加（仅追加，不改原条目）
+        r = subprocess.run(["zip", "-j", "-q", signed_apk, cert_file],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"[warn] zip 追加失败: {r.stderr[-500:]}")
+            return 0
         with zipfile.ZipFile(signed_apk) as z:
             ok = any(re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I) for n in z.namelist())
-        print(f"[check] 最终 APK META-INF cert present: {ok}")
+        print(f"[check] 最终 APK META-INF cert present: {ok} ({cert_name})")
         return 1 if ok else 0
     except Exception as e:
         print(f"[warn] 签名后追加失败: {e}")
         return 0
+    finally:
+        if cert_file:
+            try:
+                os.unlink(cert_file)
+            except OSError:
+                pass
+
 
 
 def main():

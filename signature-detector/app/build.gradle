@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "r.s.sign"
-        minSdk 21
+        minSdk 26
         //noinspection ExpiredTargetSdkVersion,OldTargetApi
         targetSdk 32
         versionCode 1

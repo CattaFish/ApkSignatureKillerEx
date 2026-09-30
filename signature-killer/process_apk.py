@@ -529,15 +529,6 @@ def main():
     aligned = os.path.join(WORK, "aligned.apk")
     processed = os.path.join(WORK, f"processed_{ts}.apk")
     run([zipalign, "-f", "4", os.path.join(WORK, "unsigned.apk"), aligned])
-    run([apksigner, "sign",
-         "--ks", KEYSTORE,
-         "--ks-key-alias", KEY_ALIAS,
-         "--ks-pass", f"pass:{STORE_PASS}",
-         "--key-pass", f"pass:{STORE_PASS}",
-         "--v1-signing-enabled", "false",
-         "--v2-signing-enabled", "true",
-         "--out", processed, aligned])
-    append_cert_after_sign(apk_path, processed)
     print("[ok] 签名完成")
     print()
     print("输出: " + os.path.abspath(processed))

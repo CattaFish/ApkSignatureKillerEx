@@ -43,6 +43,8 @@ public class KillerApplication extends Application {
     private static final AtomicBoolean sInitDone = new AtomicBoolean(false);
     private static final Map<String, Signature[]> sSignatureCache = new ConcurrentHashMap<>();
     private static final Set<String> sSignatureMisses = new HashSet<>();
+    private static byte[] sPmExpectedCert;
+    private static final AtomicBoolean sPmProxyInstalled = new AtomicBoolean(false);
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
     @Override
@@ -84,10 +86,17 @@ public class KillerApplication extends Application {
                 try {
                     cacheOriginalSignature(packageName, signatureBytes);
                     killPM(packageName);
+                    installPmProxy(context);
                     Log.w(TAG, "init: killPM done");
                 } catch (Throwable t) {
                     Log.e(TAG, "init: killPM threw", t);
                 }
+            }
+            try {
+                redirectApkPaths(context);
+                Log.w(TAG, "init: redirectApkPaths done");
+            } catch (Throwable t) {
+                Log.e(TAG, "init: redirectApkPaths threw", t);
             }
             try {
                 killOpen(packageName);
@@ -254,6 +263,7 @@ public class KillerApplication extends Application {
             Signature[] sigs = new Signature[]{new Signature(signatureBytes)};
             sSignatureCache.put(packageName, sigs);
             sSignatureMisses.remove(packageName);
+            sPmExpectedCert = signatureBytes;
         } catch (Throwable e) {
             Log.w(TAG, "cacheOriginalSignature failed for " + packageName, e);
         }
@@ -341,6 +351,151 @@ public class KillerApplication extends Application {
             }
         } catch (Throwable e) {
             Log.w(TAG, "deep mSigningDetails replace failed for " + packageName, e);
+        }
+    }
+
+    private static boolean pmCertMatches(byte[] cert, int type) {
+        if (sPmExpectedCert == null || cert == null) return false;
+        try {
+            if (type == PackageManager.CERT_INPUT_RAW_X509) {
+                return java.security.MessageDigest.isEqual(sPmExpectedCert, cert);
+            }
+            if (type == PackageManager.CERT_INPUT_SHA256) {
+                byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(sPmExpectedCert);
+                return java.security.MessageDigest.isEqual(digest, cert);
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "pmCertMatches failed", e);
+        }
+        return false;
+    }
+
+    private static void installPmProxy(Context ctx) {
+        try {
+            if (ctx == null || sPmExpectedCert == null || !sPmProxyInstalled.compareAndSet(false, true)) {
+                return;
+            }
+            Object pm = ctx.getPackageManager();
+            if (pm == null) return;
+            Field mPmField = findField(pm.getClass(), "mPM");
+            mPmField.setAccessible(true);
+            final Object orig = mPmField.get(pm);
+            final Class<?> iPmClass = mPmField.getType();
+            final String selfPkg = ctx.getPackageName();
+            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
+                    ctx.getClass().getClassLoader(),
+                    new Class<?>[]{iPmClass},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                            String name = method.getName();
+                            if ("hasSigningCertificate".equals(name)
+                                    && args != null && args.length >= 3
+                                    && args[0] instanceof String
+                                    && selfPkg.equals(args[0])
+                                    && args[1] instanceof byte[]
+                                    && args[2] instanceof Integer) {
+                                if (pmCertMatches((byte[]) args[1], (Integer) args[2])) {
+                                    Log.w(TAG, "PmProxy: hasSigningCertificate -> true for " + selfPkg);
+                                    return Boolean.TRUE;
+                                }
+                            }
+                            return method.invoke(orig, args);
+                        }
+                    });
+            mPmField.set(pm, proxy);
+            try {
+                Class<?> atClass = Class.forName("android.app.ActivityThread");
+                java.lang.reflect.Field s = null;
+                Class<?> sc = atClass;
+                while (sc != null) {
+                    try {
+                        s = sc.getDeclaredField("sPackageManager");
+                        break;
+                    } catch (NoSuchFieldException e) {
+                        sc = sc.getSuperclass();
+                    }
+                }
+                if (s != null) {
+                    s.setAccessible(true);
+                    s.set(null, proxy);
+                }
+            } catch (Throwable ignored) {
+            }
+            Log.w(TAG, "PmProxy installed");
+        } catch (Throwable t) {
+            Log.w(TAG, "installPmProxy failed", t);
+        }
+    }
+
+    private static void setPathField(ApplicationInfo ai, String field, String path) {
+        try {
+            findField(ApplicationInfo.class, field).set(ai, path);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void redirectApkPaths(Context ctx) {
+        try {
+            File repFile = new File(ctx.getDataDir(), "signed.apk");
+            if (!repFile.isFile() || repFile.length() <= 0) return;
+            final String target = repFile.getAbsolutePath();
+
+            ApplicationInfo ai = ctx.getApplicationInfo();
+            ai.sourceDir = target;
+            ai.publicSourceDir = target;
+            setPathField(ai, "scanSourceDir", target);
+            setPathField(ai, "scanPublicSourceDir", target);
+            setPathField(ai, "baseCodePath", target);
+            setPathField(ai, "baseResourcePath", target);
+
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Method cm = atClass.getDeclaredMethod("currentActivityThread");
+            cm.setAccessible(true);
+            Object at = cm.invoke(null);
+            if (at == null) return;
+
+            try {
+                Object bound = findField(atClass, "mBoundApplication").get(at);
+                if (bound != null) {
+                    Object loadedApk = findField(bound.getClass(), "info").get(bound);
+                    if (loadedApk != null) {
+                        findField(loadedApk.getClass(), "mResDir").set(loadedApk, target);
+                        Log.w(TAG, "redirectApkPaths: LoadedApk.mResDir -> " + target);
+                        try {
+                            Object lai = findField(loadedApk.getClass(), "mApplicationInfo").get(loadedApk);
+                            if (lai instanceof ApplicationInfo) {
+                                ApplicationInfo laAppInfo = (ApplicationInfo) lai;
+                                laAppInfo.sourceDir = target;
+                                laAppInfo.publicSourceDir = target;
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+
+            try {
+                Object all = findField(atClass, "mAllApplications").get(at);
+                if (all instanceof java.util.List) {
+                    for (Object appObj : (java.util.List<?>) all) {
+                        try {
+                            Object base = findField(appObj.getClass(), "mBase").get(appObj);
+                            if (base != null) {
+                                Object pi = findField(base.getClass(), "mPackageInfo").get(base);
+                                if (pi != null) {
+                                    findField(pi.getClass(), "mResDir").set(pi, target);
+                                }
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "redirectApkPaths failed", t);
         }
     }
 

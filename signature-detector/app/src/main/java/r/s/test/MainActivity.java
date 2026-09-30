@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
-    private String v2LastError;
+    private static String v2LastError;
 
 
     @SuppressLint("SetTextI18n")
@@ -292,7 +292,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private byte[] signatureFromApkSigningBlockBytes(byte[] data) {
+    private static byte[] signatureFromApkSigningBlockBytes(byte[] data) {
         v2LastError = null;
         if (data == null || data.length < 32) { v2LastError = "data too small"; return null; }
         int fileLen = data.length;
@@ -345,7 +345,7 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private byte[] parseApkSignerBlock(byte[] value, int start, int len) {
+    private static byte[] parseApkSignerBlock(byte[] value, int start, int len) {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(value, start, len);
              DataInputStream dis = new DataInputStream(bais)) {
             // 关键：v2/v3 块 value = 长度前缀的 signer 序列（无 count 字段）
@@ -368,7 +368,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private byte[] extractCertFromSigner(byte[] signer) {
+    private static byte[] extractCertFromSigner(byte[] signer) {
         // signer = signedData | signatures | publicKey（均为 length-prefixed）
         // 不逐层猜测字段：直接搜索 X.509 证书标记（30 82 <len16> + 完整 ASN.1）
         try {
@@ -497,14 +497,14 @@ public class MainActivity extends Activity {
         return resolved;
     }
 
-    private byte[] signatureFromApkFile(File apkFile) {
+    private static byte[] signatureFromApkFile(File apkFile) {
         if (apkFile == null || !apkFile.isFile()) return null;
         byte[] sig = signatureFromApkV1File(apkFile);
         if (sig != null) return sig;
         return signatureFromApkSigningBlockFile(apkFile);
     }
 
-    private byte[] signatureFromApkV1File(File apkFile) {
+    private static byte[] signatureFromApkV1File(File apkFile) {
         try (ZipFile zipFile = new ZipFile(apkFile)) {
             Enumeration<? extends ZipEntry> entries = zipFile.entries();
             while (entries.hasMoreElements()) {
@@ -522,7 +522,7 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private byte[] signatureFromApkSigningBlockFile(File apkFile) {
+    private static byte[] signatureFromApkSigningBlockFile(File apkFile) {
         long fileLen = apkFile.length();
         if (fileLen <= 0 || fileLen > 200 * 1024 * 1024) return null;
         try (RandomAccessFile raf = new RandomAccessFile(apkFile, "r")) {

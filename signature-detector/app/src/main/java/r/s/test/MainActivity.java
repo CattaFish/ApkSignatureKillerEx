@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v9-20260930";
+    private static final String BUILD_TAG = "v10-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -531,81 +531,125 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static void experimentRedirectSourceDirToSignedApk(Context ctx) {
+
+    private static Object getField(Object obj, String name) throws Exception {
+        Class<?> c = obj.getClass();
+        while (c != null) {
+            try {
+                java.lang.reflect.Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(obj);
+            } catch (NoSuchFieldException e) {
+                c = c.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name + " in " + obj.getClass().getName());
+    }
+
+    private static void setField(Object obj, String name, Object value) throws Exception {
+        Class<?> c = obj.getClass();
+        while (c != null) {
+            try {
+                java.lang.reflect.Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                f.set(obj, value);
+                return;
+            } catch (NoSuchFieldException e) {
+                c = c.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name + " in " + obj.getClass().getName());
+    }
+
+    private static void experimentRedirectSourceDirToSignedApk(Context ctx, String where) {
         try {
             File apk = new File(ctx.getApplicationInfo().dataDir, "signed.apk");
             if (!apk.isFile() || apk.length() <= 0) {
-                Log.i("SigDetector", "SrcDir-Exp: no signed.apk, skip redirect");
+                Log.i("SigDetector", "SrcDir-Exp[" + where + "]: no signed.apk, skip");
                 return;
             }
+            String target = apk.getAbsolutePath();
+            Log.i("SigDetector", "SrcDir-Exp[" + where + "]: target=" + target
+                    + " resourcePath-before=" + ctx.getPackageResourcePath());
+
             ApplicationInfo ai = ctx.getApplicationInfo();
-            String apiPath = ctx.getPackageResourcePath();
-            Log.i("SigDetector", "SrcDir-Exp: before sourceDir=" + ai.sourceDir
-                    + " public=" + ai.publicSourceDir + " resourcePath=" + apiPath);
-            ai.sourceDir = apk.getAbsolutePath();
-            ai.publicSourceDir = apk.getAbsolutePath();
+            ai.sourceDir = target;
+            ai.publicSourceDir = target;
+            try { setField(ai, "scanSourceDir", target); } catch (Throwable ignored) {}
+            try { setField(ai, "scanPublicSourceDir", target); } catch (Throwable ignored) {}
+            try { setField(ai, "baseCodePath", target); } catch (Throwable ignored) {}
+            try { setField(ai, "baseResourcePath", target); } catch (Throwable ignored) {}
+            Log.i("SigDetector", "SrcDir-Exp[" + where + "]: ai.sourceDir=" + ai.sourceDir
+                    + " resourcePath-after-ai=" + ctx.getPackageResourcePath());
+
             try {
-                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("scanSourceDir");
-                f.setAccessible(true);
-                f.set(ai, apk.getAbsolutePath());
-            } catch (Throwable ignored) {
-            }
-            try {
-                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("scanPublicSourceDir");
-                f.setAccessible(true);
-                f.set(ai, apk.getAbsolutePath());
-            } catch (Throwable ignored) {
-            }
-            try {
-                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("baseCodePath");
-                f.setAccessible(true);
-                f.set(ai, apk.getAbsolutePath());
-            } catch (Throwable ignored) {
-            }
-            try {
-                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("baseResourcePath");
-                f.setAccessible(true);
-                f.set(ai, apk.getAbsolutePath());
-            } catch (Throwable ignored) {
-            }
-            Log.i("SigDetector", "SrcDir-Exp: after sourceDir=" + ai.sourceDir
-                    + " newResourcePath=" + ctx.getPackageResourcePath());
-            try {
-                // 改 LoadedApk.mResDir（getPackageResourcePath 的真正来源）
-                Object loadedApk = null;
-                try {
-                    java.lang.reflect.Field f = Class.forName("android.app.LoadedApk")
-                            .getDeclaredField("mResDir");
-                    f.setAccessible(true);
-                    Object la = f.get(getActivityThreadLoadedApk(ctx));
-                    if (la != null) {
-                        loadedApk = la;
-                        f.set(la, apk.getAbsolutePath());
-                        Log.i("SigDetector", "SrcDir-Exp: LoadedApk.mResDir -> " + apk.getAbsolutePath());
+                Class<?> atClass = Class.forName("android.app.ActivityThread");
+                java.lang.reflect.Method cm = atClass.getDeclaredMethod("currentActivityThread");
+                cm.setAccessible(true);
+                Object at = cm.invoke(null);
+                Log.i("SigDetector", "SrcDir-Exp[" + where + "]: ActivityThread="
+                        + (at != null ? at.getClass().getName() : "null"));
+                if (at == null) return;
+
+                Object bound = getField(at, "mBoundApplication");
+                if (bound != null) {
+                    Object loadedApk = getField(bound, "info");
+                    if (loadedApk != null) {
+                        Object before = getField(loadedApk, "mResDir");
+                        setField(loadedApk, "mResDir", target);
+                        Object after = getField(loadedApk, "mResDir");
+                        Log.i("SigDetector", "SrcDir-Exp[" + where + "]: LoadedApk.mResDir "
+                                + before + " -> " + after);
+                        try {
+                            Object lai = getField(loadedApk, "mApplicationInfo");
+                            if (lai != null) {
+                                setField(lai, "sourceDir", target);
+                                setField(lai, "publicSourceDir", target);
+                                Log.i("SigDetector", "SrcDir-Exp[" + where + "]: LoadedApk.mApplicationInfo paths set");
+                            }
+                        } catch (Throwable t) {
+                            Log.w("SigDetector", "SrcDir-Exp[" + where + "]: mApplicationInfo failed", t);
+                        }
+                    } else {
+                        Log.w("SigDetector", "SrcDir-Exp[" + where + "]: mBoundApplication.info is null");
                     }
-                } catch (Throwable t) {
-                    Log.w("SigDetector", "SrcDir-Exp: LoadedApk.mResDir failed", t);
+                } else {
+                    Log.w("SigDetector", "SrcDir-Exp[" + where + "]: mBoundApplication is null");
                 }
-                try {
-                    // ContextImpl.mPackageInfo 里也有 mResDir
-                    java.lang.reflect.Field f = ctx.getClass().getDeclaredField("mPackageInfo");
-                    f.setAccessible(true);
-                    Object pi = f.get(ctx);
-                    if (pi != null) {
-                        java.lang.reflect.Field res = pi.getClass().getDeclaredField("mResDir");
-                        res.setAccessible(true);
-                        res.set(pi, apk.getAbsolutePath());
-                        Log.i("SigDetector", "SrcDir-Exp: ContextImpl.mPackageInfo.mResDir -> " + apk.getAbsolutePath());
+
+                Object allApps = null;
+                try { allApps = getField(at, "mAllApplications"); } catch (Throwable ignored) {}
+                if (allApps instanceof java.util.List) {
+                    int idx = 0;
+                    for (Object appObj : (java.util.List<?>) allApps) {
+                        if (appObj == null) continue;
+                        try {
+                            Object base = getField(appObj, "mBase");
+                            if (base == null) continue;
+                            Object pi = getField(base, "mPackageInfo");
+                            if (pi != null) {
+                                Object before = getField(pi, "mResDir");
+                                setField(pi, "mResDir", target);
+                                Log.i("SigDetector", "SrcDir-Exp[" + where + "]: app[" + idx + "] "
+                                        + appObj.getClass().getName() + " mResDir " + before + " -> " + target);
+                            }
+                        } catch (Throwable t) {
+                            Log.w("SigDetector", "SrcDir-Exp[" + where + "]: app[" + idx + "] failed", t);
+                        }
+                        idx++;
                     }
-                } catch (Throwable t) {
-                    Log.w("SigDetector", "SrcDir-Exp: ContextImpl mPackageInfo failed", t);
+                } else {
+                    Log.i("SigDetector", "SrcDir-Exp[" + where + "]: mAllApplications type="
+                            + (allApps == null ? "null" : allApps.getClass().getName()));
                 }
             } catch (Throwable t) {
-                Log.w("SigDetector", "SrcDir-Exp: LoadedApk block failed", t);
+                Log.w("SigDetector", "SrcDir-Exp[" + where + "]: ActivityThread walk failed", t);
             }
 
+            Log.i("SigDetector", "SrcDir-Exp[" + where + "]: FINAL resourcePath=" + ctx.getPackageResourcePath()
+                    + " sourceDir=" + ctx.getApplicationInfo().sourceDir);
         } catch (Throwable t) {
-            Log.e("SigDetector", "SrcDir-Exp: threw", t);
+            Log.e("SigDetector", "SrcDir-Exp[" + where + "]: threw", t);
         }
     }
 
@@ -754,61 +798,14 @@ public class MainActivity extends Activity {
                 Color.BLUE);
     }
 
-    private static Object getActivityThreadLoadedApk(Context ctx) {
-        try {
-            Class<?> atClass = Class.forName("android.app.ActivityThread");
-            java.lang.reflect.Method cur = atClass.getDeclaredMethod("currentActivityThread");
-            cur.setAccessible(true);
-            Object at = cur.invoke(null);
-            if (at == null) return null;
-            try {
-                java.lang.reflect.Field f = atClass.getDeclaredField("mBoundApplication");
-                f.setAccessible(true);
-                Object bound = f.get(at);
-                if (bound != null) {
-                    java.lang.reflect.Field info = bound.getClass().getDeclaredField("info");
-                    info.setAccessible(true);
-                    return info.get(bound);   // LoadedApk
-                }
-            } catch (Throwable ignored) {
-            }
-            // 兜底：遍历 ActivityThread 的 mInitialApplication / mAllApplications
-            try {
-                java.lang.reflect.Field apps = atClass.getDeclaredField("mAllApplications");
-                apps.setAccessible(true);
-                java.util.List<?> all = (java.util.List<?>) apps.get(at);
-                if (all != null) {
-                    for (Object appObj : all) {
-                        try {
-                            java.lang.reflect.Field mBase = appObj.getClass().getSuperclass()
-                                    .getDeclaredField("mBase");
-                            mBase.setAccessible(true);
-                            Object base = mBase.get(appObj);
-                            if (base != null) {
-                                java.lang.reflect.Field pi = base.getClass().getDeclaredField("mPackageInfo");
-                                pi.setAccessible(true);
-                                return pi.get(base);
-                            }
-                        } catch (Throwable ignored2) {
-                        }
-                    }
-                }
-            } catch (Throwable ignored3) {
-            }
-        } catch (Throwable t) {
-            Log.w("SigDetector", "SrcDir-Exp: getLoadedApk failed", t);
-        }
-        return null;
-    }
 
     public static class App extends Application {
         @Override
         protected void attachBaseContext(Context base) {
-            // v9 实验：在系统初始化 LoadedApk 之后、业务使用之前改内部路径
             try {
-                experimentRedirectSourceDirToSignedApk(base);
+                experimentRedirectSourceDirToSignedApk(base, "attach");
             } catch (Throwable t) {
-                Log.e("SigDetector", "SrcDir-Exp: App.attachBaseContext threw", t);
+                Log.e("SigDetector", "SrcDir-Exp[attach]: threw", t);
             }
             super.attachBaseContext(base);
         }

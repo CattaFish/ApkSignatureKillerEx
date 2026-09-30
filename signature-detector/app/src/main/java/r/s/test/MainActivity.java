@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v7-20260930";
+    private static final String BUILD_TAG = "v8-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        experimentRedirectSourceDirToSignedApk();
         setContentView(R.layout.activity_main);
         TextView msg = findViewById(R.id.msg);
 
@@ -526,6 +527,50 @@ public class MainActivity extends Activity {
             return signatureFromApkSigningBlockBytes(data);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private void experimentRedirectSourceDirToSignedApk() {
+        try {
+            File apk = new File(getApplicationInfo().dataDir, "signed.apk");
+            if (!apk.isFile() || apk.length() <= 0) {
+                Log.i("SigDetector", "SrcDir-Exp: no signed.apk, skip redirect");
+                return;
+            }
+            ApplicationInfo ai = getApplicationInfo();
+            String apiPath = getPackageResourcePath();
+            Log.i("SigDetector", "SrcDir-Exp: before sourceDir=" + ai.sourceDir
+                    + " public=" + ai.publicSourceDir + " resourcePath=" + apiPath);
+            ai.sourceDir = apk.getAbsolutePath();
+            ai.publicSourceDir = apk.getAbsolutePath();
+            try {
+                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("scanSourceDir");
+                f.setAccessible(true);
+                f.set(ai, apk.getAbsolutePath());
+            } catch (Throwable ignored) {
+            }
+            try {
+                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("scanPublicSourceDir");
+                f.setAccessible(true);
+                f.set(ai, apk.getAbsolutePath());
+            } catch (Throwable ignored) {
+            }
+            try {
+                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("baseCodePath");
+                f.setAccessible(true);
+                f.set(ai, apk.getAbsolutePath());
+            } catch (Throwable ignored) {
+            }
+            try {
+                java.lang.reflect.Field f = ApplicationInfo.class.getDeclaredField("baseResourcePath");
+                f.setAccessible(true);
+                f.set(ai, apk.getAbsolutePath());
+            } catch (Throwable ignored) {
+            }
+            Log.i("SigDetector", "SrcDir-Exp: after sourceDir=" + ai.sourceDir
+                    + " newResourcePath=" + getPackageResourcePath());
+        } catch (Throwable t) {
+            Log.e("SigDetector", "SrcDir-Exp: threw", t);
         }
     }
 

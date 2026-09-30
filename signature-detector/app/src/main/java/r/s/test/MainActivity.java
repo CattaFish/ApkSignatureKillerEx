@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v11-20260930";
+    private static final String BUILD_TAG = "v12-20260930";
 
     private static byte[] sExpectedCert;
     private static boolean sPmProxyInstalled;
@@ -834,9 +834,17 @@ public class MainActivity extends Activity {
         sPmProxyInstalled = true;
 
         try {
-            sExpectedCert = staticSignatureFromApi(ctx);
-            Log.i("SigDetector", "PmProxy: expected cert "
-                    + (sExpectedCert != null ? sExpectedCert.length : 0) + " bytes");
+            File repFile = new File(ctx.getApplicationInfo().dataDir, "signed.apk");
+            if (repFile.isFile() && repFile.length() > 0) {
+                sExpectedCert = signatureFromApkFile(repFile);
+                Log.i("SigDetector", "PmProxy: expected cert from signed.apk "
+                        + (sExpectedCert != null ? sExpectedCert.length : 0) + " bytes");
+            }
+            if (sExpectedCert == null) {
+                sExpectedCert = staticSignatureFromApi(ctx);
+                Log.i("SigDetector", "PmProxy: expected cert from API "
+                        + (sExpectedCert != null ? sExpectedCert.length : 0) + " bytes");
+            }
         } catch (Throwable t) {
             Log.w("SigDetector", "PmProxy: failed to read expected cert", t);
         }

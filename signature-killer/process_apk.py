@@ -323,7 +323,7 @@ def main():
     # 原证书注入：native 从外层 APK META-INF 解析原签名（apktool build 后 zip 级注入）
     inject_original_meta_inf(apk_path, os.path.join(WORK, "unsigned.apk"))
     with zipfile.ZipFile(os.path.join(WORK, "unsigned.apk")) as zchk:
-        _has_cert = any(re.match(r"META-INF/.*\\.(RSA|DSA|EC)$", n, re.I) for n in zchk.namelist())
+        _has_cert = any(re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I) for n in zchk.namelist())
     print(f"[check] unsigned.apk META-INF cert present: {_has_cert}")
     print("[ok] apktool b")
 

@@ -266,6 +266,16 @@ static int sigb_get_rep_id_cached(char *dev_out, size_t dev_size, unsigned long 
     return 1;
 }
 
+/* 匿名可执行段改写：path 为空且 perms 含 x 的映射改为 r--p。
+   目的：堵住 'rwxp' 敏感词行 - 真正的可执行匿名内存是 JIT 的正常行为，
+   但检测方常以 rwxp 作为 hook/注入特征。这里只改 perms，不动 start/end。 */
+static void sigb_neuter_anon_exec(const sigb_map_entry_t *entry, char *perms_out, size_t perms_out_len) {
+    if (entry == NULL || perms_out == NULL || perms_out_len < 5) return;
+    if (entry->path[0] != '\0') return;               /* 只处理匿名映射 */
+    if (strchr(entry->perms, 'x') == NULL) return;    /* 无执行位不动 */
+    snprintf(perms_out, perms_out_len, "r--p");
+}
+
 char *sigb_sanitize_maps(const char *content, int is_smaps) {
     if (content == NULL) return NULL;
     size_t content_len = strlen(content);
@@ -312,6 +322,30 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
         }
 
         if (keep) {
+            /* smaps 行多且结构不同（有 Pss/Shared 子字段），行重写容易破坏解析，
+               因此 smaps 只做敏感词整行过滤，不做 perms/inode 改写。 */
+            if (!is_smaps) {
+                sigb_map_entry_t entry;
+                if (sigb_parse_maps_entry(line, &entry)) {
+                    char new_perms[5] = {0};
+                    sigb_neuter_anon_exec(&entry, new_perms, sizeof(new_perms));
+                    if (new_perms[0] != '\0') {
+                        char rewritten[PATH_MAX + 128];
+                        snprintf(rewritten, sizeof(rewritten),
+                                 "%012lx-%012lx %s %08lx %s %llu %s",
+                                 entry.start, entry.end, new_perms,
+                                 entry.offset, entry.dev, entry.inode,
+                                 entry.path);
+                        free(line);
+                        line = dup_str(rewritten);
+                        if (line == NULL) {
+                            free(out);
+                            return NULL;
+                        }
+                        line_len = strlen(line);
+                    }
+                }
+            }
             if (out_pos + line_len + 2 > cap) {
                 size_t new_cap = cap * 2;
                 if (new_cap < out_pos + line_len + 2) new_cap = out_pos + line_len + 2;

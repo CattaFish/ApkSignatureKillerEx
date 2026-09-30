@@ -569,7 +569,7 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
             }
             Log.i("SigDetector", "SrcDir-Exp: after sourceDir=" + ai.sourceDir
-                    + " newResourcePath=" + getPackageResourcePath());
+                    + " newResourcePath=" + ctx.getPackageResourcePath());
             try {
                 // 改 LoadedApk.mResDir（getPackageResourcePath 的真正来源）
                 Object loadedApk = null;

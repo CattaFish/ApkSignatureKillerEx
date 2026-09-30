@@ -5,7 +5,9 @@ import android.app.Activity;
 import android.app.Application;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.SigningInfo;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.text.SpannableStringBuilder;
@@ -49,7 +51,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v3-20260930";
+    private static final String BUILD_TAG = "v4-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -99,6 +101,27 @@ public class MainActivity extends Activity {
         }
 
         runDetectors(sb, signatureExpected);
+
+        // ---- Stage 1.5 probes (for stage-1 killer validation) ----
+        byte[] sigSigningInfo = signatureFromSigningInfo();
+        String strSigningInfo = sigSigningInfo == null
+                ? (Build.VERSION.SDK_INT < Build.VERSION_CODES.P ? "SKIP(<28)" : "N/A")
+                : md5(sigSigningInfo);
+        append(sb, "From SigningInfo: ", strSigningInfo,
+                sigSigningInfo != null && signatureExpected.equals(strSigningInfo) ? Color.BLUE
+                        : (sigSigningInfo == null ? Color.GRAY : Color.RED));
+
+        String strHasSigningCert = probeHasSigningCertificate();
+        append(sb, "hasSigningCertificate: ", strHasSigningCert,
+                "true".equals(strHasSigningCert) ? Color.BLUE
+                        : (strHasSigningCert.startsWith("SKIP") || strHasSigningCert.startsWith("ERR") ? Color.GRAY : Color.RED));
+
+        byte[] sigArchiveInfo = signatureFromArchiveInfo();
+        String strArchiveInfo = sigArchiveInfo == null ? "N/A" : md5(sigArchiveInfo);
+        append(sb, "From ArchiveInfo: ", strArchiveInfo,
+                sigArchiveInfo != null && signatureExpected.equals(strArchiveInfo) ? Color.BLUE
+                        : (sigArchiveInfo == null ? Color.GRAY : Color.RED));
+        // ---- end stage 1.5 probes ----
         append(sb, "V2DBG: ", v2LastError == null ? "ok" : v2LastError, Color.GRAY);
 
         msg.setText(sb);
@@ -144,6 +167,54 @@ public class MainActivity extends Activity {
         byte[] apkBytes = readRawApkBytesViaSvc();
         return signatureFromApkSigningBlockBytes(apkBytes);
     }
+
+    // ---- Stage 1.5 probe helpers ----
+
+    private byte[] signatureFromSigningInfo() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null;
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), PackageManager.GET_SIGNING_INFO);
+            SigningInfo signingInfo = info.signingInfo;
+            if (signingInfo == null) return null;
+            Signature[] signatures = signingInfo.getApkContentsSigners();
+            if (signatures == null || signatures.length == 0) return null;
+            return signatures[0].toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String probeHasSigningCertificate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return "SKIP(<28)";
+        try {
+            byte[] cert = null;
+            try {
+                cert = signatureFromAPI();
+            } catch (RuntimeException ignored) {
+            }
+            if (cert == null) cert = getAPKSignatureData();
+            if (cert == null) return "ERR:cert";
+            byte[] sha256 = MessageDigest.getInstance("SHA-256").digest(cert);
+            boolean ok = getPackageManager().hasSigningCertificate(
+                    getPackageName(), sha256, PackageManager.CERT_INPUT_SHA256);
+            return ok ? "true" : "false";
+        } catch (Exception e) {
+            return "ERR:" + e.getClass().getSimpleName();
+        }
+    }
+
+    private byte[] signatureFromArchiveInfo() {
+        try {
+            PackageInfo info = getPackageManager().getPackageArchiveInfo(
+                    getPackageResourcePath(), PackageManager.GET_SIGNATURES);
+            if (info == null || info.signatures == null || info.signatures.length == 0) return null;
+            return info.signatures[0].toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ---- end stage 1.5 probe helpers ----
 
     private byte[] signatureFromSVCV1() {
         try (ParcelFileDescriptor fd = ParcelFileDescriptor.adoptFd(openAt(getPackageResourcePath()));

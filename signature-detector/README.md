@@ -12,6 +12,9 @@
 | 行 | 原理 | 被 killer 处理后 |
 |---|---|---|
 | From API | `PackageManager.GET_SIGNATURES` | 显示内嵌 input.apk 的签名（蓝） |
+| From SigningInfo | `PackageManager.GET_SIGNING_INFO` → `getApkContentsSigners()[0]`（API 28+） | stage-1 深度替换后显示 input.apk 签名（蓝） |
+| hasSigningCertificate | `PackageManager.hasSigningCertificate(pkg, cert-SHA-256)`（API 28+） | 无 ART hook 时 PMS 直查仍返回 false（红），确认已知盲区 |
+| From ArchiveInfo | `PackageManager.getPackageArchiveInfo` 本地解析返回 | CREATOR 生效时显示 input.apk 签名（蓝） |
 | From APK | 直接读 APK 内 META-INF 证书 | open 重定向到替换 APK（蓝） |
 | From SVC | 原始 syscall 读文件，绕过用户态 hook | 显示 fake.jks 真签名（红） |
 | ch4 | native fopen 读证书 | PASS（蓝） |

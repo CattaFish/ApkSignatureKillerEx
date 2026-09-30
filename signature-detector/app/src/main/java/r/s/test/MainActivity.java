@@ -54,7 +54,10 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v10-20260930";
+    private static final String BUILD_TAG = "v11-20260930";
+
+    private static byte[] sExpectedCert;
+    private static boolean sPmProxyInstalled;
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -799,11 +802,132 @@ public class MainActivity extends Activity {
     }
 
 
+    private static byte[] staticSignatureFromApi(Context ctx) {
+        try {
+            @SuppressLint("PackageManagerGetSignatures")
+            PackageInfo info = ctx.getPackageManager().getPackageInfo(
+                    ctx.getPackageName(), PackageManager.GET_SIGNATURES);
+            return info.signatures[0].toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean certMatches(byte[] cert, int type) {
+        if (sExpectedCert == null || cert == null) return false;
+        try {
+            if (type == PackageManager.CERT_INPUT_RAW_X509) {
+                return MessageDigest.isEqual(sExpectedCert, cert);
+            }
+            if (type == PackageManager.CERT_INPUT_SHA256) {
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(sExpectedCert);
+                return MessageDigest.isEqual(digest, cert);
+            }
+        } catch (Exception e) {
+            Log.w("SigDetector", "PmProxy: certMatches failed", e);
+        }
+        return false;
+    }
+
+    private static void installPmProxy(final Context ctx) {
+        if (sPmProxyInstalled) return;
+        sPmProxyInstalled = true;
+
+        try {
+            sExpectedCert = staticSignatureFromApi(ctx);
+            Log.i("SigDetector", "PmProxy: expected cert "
+                    + (sExpectedCert != null ? sExpectedCert.length : 0) + " bytes");
+        } catch (Throwable t) {
+            Log.w("SigDetector", "PmProxy: failed to read expected cert", t);
+        }
+
+        try {
+            Object pm = ctx.getPackageManager();
+            Class<?> c = pm.getClass();
+            java.lang.reflect.Field mPmField = null;
+            while (c != null) {
+                try {
+                    mPmField = c.getDeclaredField("mPM");
+                    break;
+                } catch (NoSuchFieldException e) {
+                    c = c.getSuperclass();
+                }
+            }
+            if (mPmField == null) {
+                Log.w("SigDetector", "PmProxy: mPM field not found");
+                return;
+            }
+            mPmField.setAccessible(true);
+            final Object orig = mPmField.get(pm);
+            final Class<?> iPmClass = mPmField.getType();
+            Log.i("SigDetector", "PmProxy: iPmClass=" + iPmClass.getName()
+                    + " orig=" + (orig != null ? orig.getClass().getName() : "null"));
+
+            final String selfPkg = ctx.getPackageName();
+            final ClassLoader cl = ctx.getClass().getClassLoader();
+
+            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
+                    cl,
+                    new Class<?>[]{iPmClass},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, java.lang.reflect.Method method,
+                                             Object[] args) throws Throwable {
+                            String name = method.getName();
+                            if ("hasSigningCertificate".equals(name)
+                                    && args != null && args.length >= 3
+                                    && args[0] instanceof String
+                                    && selfPkg.equals(args[0])
+                                    && args[1] instanceof byte[]
+                                    && args[2] instanceof Integer) {
+                                if (certMatches((byte[]) args[1], (Integer) args[2])) {
+                                    Log.i("SigDetector", "PmProxy: hasSigningCertificate -> true for " + args[0]);
+                                    return Boolean.TRUE;
+                                }
+                            }
+                            return method.invoke(orig, args);
+                        }
+                    });
+
+            mPmField.set(pm, proxy);
+
+            try {
+                Class<?> atClass = Class.forName("android.app.ActivityThread");
+                java.lang.reflect.Field spm = null;
+                Class<?> sc = atClass;
+                while (sc != null) {
+                    try {
+                        spm = sc.getDeclaredField("sPackageManager");
+                        break;
+                    } catch (NoSuchFieldException e) {
+                        sc = sc.getSuperclass();
+                    }
+                }
+                if (spm != null) {
+                    spm.setAccessible(true);
+                    spm.set(null, proxy);
+                    Log.i("SigDetector", "PmProxy: ActivityThread.sPackageManager replaced");
+                }
+            } catch (Throwable t) {
+                Log.w("SigDetector", "PmProxy: sPackageManager replace failed", t);
+            }
+
+            Log.i("SigDetector", "PmProxy: installed");
+        } catch (Throwable t) {
+            Log.e("SigDetector", "PmProxy: install failed", t);
+        }
+    }
+
     public static class App extends Application {
         @Override
         protected void attachBaseContext(Context base) {
             try {
                 experimentRedirectSourceDirToSignedApk(base, "attach");
+            try {
+                installPmProxy(base);
+            } catch (Throwable t) {
+                Log.e("SigDetector", "PmProxy[attach]: threw", t);
+            }
             } catch (Throwable t) {
                 Log.e("SigDetector", "SrcDir-Exp[attach]: threw", t);
             }

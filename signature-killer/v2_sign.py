@@ -149,10 +149,12 @@ def main():
     )
     block = build_block(signer)
 
-    out = protected + block + data[cd_offset:]
-    out = (out[:eocd + 16]
-           + u32(cd_offset + len(block))
-           + out[eocd + 20:])
+    # 先在原数据上修正 EOCD 的 cd_offset（EOCD 还在原位）
+    fixed = bytearray(data)
+    struct.pack_into("<I", fixed, eocd + 16, cd_offset + len(block))
+
+    # 拼接：保护区 + 新签名块 + 修正后的中央目录/EOCD
+    out = protected + block + bytes(fixed[cd_offset:])
 
     with open(a.output, "wb") as f:
         f.write(out)

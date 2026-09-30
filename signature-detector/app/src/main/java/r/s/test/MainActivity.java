@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
     private byte[] signatureFromSigningInfo() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null;
         try {
-            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), PackageManager.GET_SIGNING_INFO);
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
             SigningInfo signingInfo = info.signingInfo;
             if (signingInfo == null) return null;
             Signature[] signatures = signingInfo.getApkContentsSigners();

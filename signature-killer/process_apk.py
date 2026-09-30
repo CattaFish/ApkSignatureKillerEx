@@ -349,6 +349,30 @@ def append_cert_after_sign(apk_path, signed_apk):
 
 
 
+def ensure_v2_key():
+    out_dir = "work_killer"
+    os.makedirs(out_dir, exist_ok=True)
+    key = os.path.join(out_dir, "v2_key.pem")
+    cert = os.path.join(out_dir, "v2_cert.der")
+    pub = os.path.join(out_dir, "v2_pub.der")
+    if not (os.path.exists(key) and os.path.exists(cert) and os.path.exists(pub)):
+        cert_pem = os.path.join(out_dir, "v2_cert.pem")
+        run(["openssl", "genrsa", "-out", key, "2048"])
+        run(["openssl", "req", "-new", "-x509", "-key", key, "-out", cert_pem,
+             "-days", "10950", "-subj", "/CN=K"])
+        run(["openssl", "x509", "-in", cert_pem, "-outform", "DER", "-out", cert])
+        run(["openssl", "x509", "-in", cert_pem, "-pubkey", "-noout"],
+             # 管道写法用 shell 处理：直接调用 openssl 生成 pub DER
+             )
+        # 分开执行：x509 -pubkey 输出 PEM，再转 DER
+        pub_pem = os.path.join(out_dir, "v2_pub.pem")
+        r = subprocess.run(["openssl", "x509", "-in", cert_pem, "-pubkey", "-noout"],
+                           capture_output=True, text=True)
+        open(pub_pem, "w").write(r.stdout)
+        run(["openssl", "pkey", "-pubin", "-in", pub_pem, "-outform", "DER", "-out", pub])
+    return key, cert, pub
+
+
 def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
@@ -466,10 +490,40 @@ def main():
     print(f"[check] unsigned.apk META-INF cert present: {_has_cert}")
     print("[ok] apktool b")
 
-    zipalign, apksigner = find_build_tools()
-    if not zipalign or not apksigner:
+    # 注入 V1 三件套（无签名时 zip 重写无妨）：原证书 + 伪 MANIFEST/SF
+    import zipfile as _zi
+    with _zi.ZipFile(apk_path) as z:
+        _certs = [n for n in z.namelist()
+                  if re.match(r"META-INF/.*\\.(RSA|DSA|EC)$", n, re.I)]
+        _cert_data = z.read(_certs[0]) if _certs else b""
+    _tmp = os.path.join(WORK, "unsigned_v1.apk")
+    with _zi.ZipFile(os.path.join(WORK, "unsigned.apk"), "r") as zin, \
+         _zi.ZipFile(_tmp, "w") as zout:
+        for item in zin.infolist():
+            zout.writestr(item, zin.read(item.filename))
+        zout.writestr("META-INF/MANIFEST.MF",
+                      "Manifest-Version: 1.0\r\nCreated-By: custom\r\n\r\n")
+        zout.writestr("META-INF/CERT.SF",
+                      "Signature-Version: 1.0\r\nCreated-By: custom\r\n\r\n")
+        if _cert_data:
+            zout.writestr("META-INF/CERT.RSA", _cert_data)
+    os.replace(_tmp, os.path.join(WORK, "unsigned.apk"))
+    print("[ok] V1 三件套注入（原证书 + 伪 MF/SF）")
+
+    zipalign, _apksigner = find_build_tools()
+    if not zipalign:
         print("FAIL: 未找到 $ANDROID_HOME/build-tools，请设置 ANDROID_HOME")
         sys.exit(1)
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    aligned = os.path.join(WORK, "aligned.apk")
+    processed = os.path.join(WORK, f"processed_{ts}.apk")
+    run([zipalign, "-f", "4", os.path.join(WORK, "unsigned.apk"), aligned])
+    _k, _c, _p = ensure_v2_key()
+    run(["python3", "v2_sign.py",
+         "--input", aligned, "--output", processed,
+         "--key", _k, "--cert", _c, "--pub", _p])
+    print("[ok] V2 签名完成（V1 文件保留为无效壳）")
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     aligned = os.path.join(WORK, "aligned.apk")

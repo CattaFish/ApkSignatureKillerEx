@@ -464,6 +464,14 @@ public class KillerApplication extends Application {
                         findField(loadedApk.getClass(), "mResDir").set(loadedApk, target);
                         Log.w(TAG, "redirectApkPaths: LoadedApk.mResDir -> " + target);
                         try {
+                            findField(loadedApk.getClass(), "mCodePath").set(loadedApk, target);
+                        } catch (Throwable ignored) {
+                        }
+                        try {
+                            findField(loadedApk.getClass(), "mAppDir").set(loadedApk, target);
+                        } catch (Throwable ignored) {
+                        }
+                        try {
                             Object lai = findField(loadedApk.getClass(), "mApplicationInfo").get(loadedApk);
                             if (lai instanceof ApplicationInfo) {
                                 ApplicationInfo laAppInfo = (ApplicationInfo) lai;
@@ -487,6 +495,14 @@ public class KillerApplication extends Application {
                                 Object pi = findField(base.getClass(), "mPackageInfo").get(base);
                                 if (pi != null) {
                                     findField(pi.getClass(), "mResDir").set(pi, target);
+                                    try {
+                                        findField(pi.getClass(), "mCodePath").set(pi, target);
+                                    } catch (Throwable ignored) {
+                                    }
+                                    try {
+                                        findField(pi.getClass(), "mAppDir").set(pi, target);
+                                    } catch (Throwable ignored) {
+                                    }
                                 }
                             }
                         } catch (Throwable ignored) {

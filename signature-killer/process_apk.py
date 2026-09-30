@@ -176,56 +176,6 @@ def patch_expected_signature(decoded, md5_hex):
     return total
 
 
-def inject_application_clinit(decoded, manifest_path):
-    """在目标 Application 类的 <clinit> 第一条指令前注入 KillerApplication.earlyInit()。"""
-    manifest = open(manifest_path, encoding="utf-8").read()
-    m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', manifest)
-    if not m:
-        print("[warn] 无 android:name，跳过 <clinit> 注入")
-        return 0
-    app_class = m.group(1)
-    rel = app_class.replace(".", "/") + ".smali"
-    target = None
-    for name in os.listdir(decoded):
-        if re.fullmatch(r"smali(_classes\d+)?", name):
-            p = os.path.join(decoded, name, rel)
-            if os.path.exists(p):
-                target = p
-                break
-    if not target:
-        print(f"[warn] 未找到 Application smali: {rel}，跳过 <clinit> 注入")
-        return 0
-
-    s = open(target, encoding="utf-8").read()
-    marker = "invoke-static {}, Lr/s/sign/KillerApplication;->earlyInit()V"
-    if marker in s:
-        return 0
-
-    clinit_pat = re.compile(
-        r'(\.method static constructor <clinit>\(\)V\n(?:\s*\.registers \d+\n)?)'
-    )
-    m2 = clinit_pat.search(s)
-    if m2:
-        s = s[:m2.end()] + "\n    " + marker + "\n" + s[m2.end():]
-        print(f"[ok] <clinit> 已注入(首位): {target}")
-    else:
-        clinit = (
-            "\n# injected by SignatureKiller\n"
-            ".method static constructor <clinit>()V\n"
-            "    .registers 0\n\n"
-            "    " + marker + "\n\n"
-            "    return-void\n"
-            ".end method\n"
-        )
-        idx = s.find("\n.method ")
-        if idx < 0:
-            idx = len(s)
-        s = s[:idx] + clinit + s[idx:]
-        print(f"[ok] <clinit> 已创建: {target}")
-    open(target, "w", encoding="utf-8").write(s)
-    return 1
-
-
 def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
@@ -307,9 +257,6 @@ def main():
         print(f"[ok] 签名期望值已更新: {expected} ({n} 处)")
     else:
         print("[warn] 无法解析输入 APK 的 v1 签名，跳过期望值替换（界面红蓝判断可能失真）")
-
-    # <clinit> 注入：目标 Application 类加载即执行 earlyInit（比 Provider 更早）
-    inject_application_clinit(DECODED, manifest_path)
 
     # 注入 KillerProvider：进程启动早期执行 KillerApplication.init，
     # 不依赖原 Application 是否存在 onCreate

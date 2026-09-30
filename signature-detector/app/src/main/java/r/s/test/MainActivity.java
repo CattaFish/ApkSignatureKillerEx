@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
 
     private static native int openAt(String path);
 
-    private static final String BUILD_TAG = "v6-20260930";
+    private static final String BUILD_TAG = "v7-20260930";
     private String repPath;
     private byte[] apkSignatureCache;
     private boolean apkSignatureCacheSet;
@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         // And the SVC method always gets the real signature MD5
 
         SpannableStringBuilder sb = new SpannableStringBuilder();
-        append(sb, "Expected: ", signatureExpected, Color.BLACK);
+        append(sb, "Expected[auto]: ", signatureExpected, Color.BLACK);
         append(sb, "Build: ", BUILD_TAG, Color.BLACK);
         append(sb, "From API: ", signatureFromAPI, signatureExpected.equals(signatureFromAPI) ? Color.BLUE : Color.RED);
         append(sb, "From APK: ", signatureFromAPK, signatureExpected.equals(signatureFromAPK) ? Color.BLUE : Color.RED);
@@ -480,8 +480,15 @@ public class MainActivity extends Activity {
             return "1fb11e8214ae8b8c259aa9cd87387ac0";
         }
         String resolved = md5(expected);
-        Log.i("SigDetector", "Dynamic Expected=" + resolved
-                + " (signed.apk " + (repSig != null ? "present" : "absent") + ")");
+        String source;
+        if (repSig != null && selfSig != null && MessageDigest.isEqual(repSig, selfSig)) {
+            source = "signed.apk";
+        } else if (selfSig != null) {
+            source = "current-install";
+        } else {
+            source = "signed.apk-only";
+        }
+        Log.i("SigDetector", "Dynamic Expected=" + resolved + " source=" + source);
         return resolved;
     }
 

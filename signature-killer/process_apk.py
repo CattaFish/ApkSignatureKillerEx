@@ -243,10 +243,20 @@ def _make_zip_entry(fname, data, offset, dostime, dosdate):
     return local, cd
 
 
+def _find_eocd(data):
+    for i in range(len(data) - 22, max(0, len(data) - 65557) - 1, -1):
+        if data[i:i+4] == b"PK\x05\x06":
+            return i
+    return -1
+
+
 def append_cert_after_sign(apk_path, signed_apk):
-    """V2-aware：把原证书追加到 APK Signing Block 之后、中央目录之前。
-    V2 签名保护的是签名块之前的本地条目区，因此签名块之前字节不变，
-    追加后 V2 保持有效 —— 与 MT管理器(关闭自动签名)行为一致。"""
+    """纯追加：把原证书作为新 zip 条目附在已签名 APK 末尾。
+    - 签名块之前的字节（V2/V3 保护区）完全不动；
+    - 中央目录追加一条目、EOCD 更新计数，但 cd_offset 保持不变，
+      因此 V2/V3 签名仍然有效 —— 与 MT管理器(关自动签名)等效，不重新签名。"""
+    import struct, binascii
+    from datetime import datetime
     try:
         with zipfile.ZipFile(apk_path) as z:
             cert_entries = [n for n in z.namelist()
@@ -260,70 +270,81 @@ def append_cert_after_sign(apk_path, signed_apk):
         with open(signed_apk, "rb") as f:
             data = f.read()
 
-        eocd_pos = _locate_eocd(data)
+        eocd_pos = _find_eocd(data)
         if eocd_pos < 0:
-            print("[warn] EOCD 未找到，放弃 v2-safe 追加")
+            print("[warn] EOCD 未找到")
             return 0
         cd_offset = struct.unpack_from("<I", data, eocd_pos + 16)[0]
         cd_size = struct.unpack_from("<I", data, eocd_pos + 12)[0]
         total = struct.unpack_from("<H", data, eocd_pos + 10)[0]
 
-        # 定位 APK Signing Block
-        footer_pos = cd_offset - 24
-        if footer_pos < 0 or footer_pos + 24 > len(data) or \
-           data[footer_pos+8:footer_pos+24] != b"APK Sig Block 42":
-            print("[warn] 无 V2 签名块，退化为 python zipfile 追加（V2 不存在则无冲突）")
-            with zipfile.ZipFile(signed_apk, "a") as zout:
-                zi = zipfile.ZipInfo("META-INF/" + cert_name)
-                zi.external_attr = 0o644 << 16
-                zout.writestr(zi, cert_data)
-            return 1
-
-        block_size = struct.unpack_from("<Q", data, footer_pos)[0]
-        if block_size < 24 or block_size > len(data):
-            return 0
-        block_start = cd_offset - block_size
-        if block_start < 0:
+        if cd_offset + cd_size > eocd_pos:
+            print("[warn] 中央目录越界，放弃")
             return 0
 
-        prefix = data[:block_start]                       # V2 保护区（原样）
-        sig_block = data[block_start:cd_offset]           # 签名块（原样）
-        old_cd = data[cd_offset:cd_offset + cd_size]
-
-        import datetime
-        now = datetime.datetime.now()
+        fname = "META-INF/" + cert_name
+        crc = binascii.crc32(cert_data) & 0xffffffff
+        now = datetime.now()
         dostime = (now.hour << 11) | (now.minute << 5) | (now.second // 2)
         dosdate = ((now.year - 1980) << 9) | (now.month << 5) | now.day
 
-        new_local_offset = len(prefix) + len(sig_block)
-        local, cd_entry = _make_zip_entry(cert_name, cert_data, new_local_offset,
-                                          dostime, dosdate)
+        # 新本地条目（STORED，不压缩）
+        local = struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034b50, 20, 0, 0, dostime, dosdate,
+            crc, len(cert_data), len(cert_data), len(fname), 0,
+        ) + fname + cert_data
 
-        new_cd = old_cd + cd_entry
-        new_eocd_offset = len(prefix) + len(sig_block) + len(local)
+        # 新中央目录条目（offset 指向新本地位：紧接着原中央目录之后）
+        local_offset = cd_offset + cd_size + len(local)  # 先占位，实际下面重算
+        # 中央目录条目要放在新本地之后，因此条目里的 offset = 中央目录起始 + 本地位于其前
+        # 布局：原数据[0..cd_offset) 原CD 新CD条目 新本地条目 新EOCD
+        new_cd_entry_start = cd_offset + cd_size
+        local_at = new_cd_entry_start + 44 + len(fname)  # 44 = CD entry 固定头
+        external = (0o644 & 0xFFFF) << 16
+        cd_entry = struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014b50,
+            (3 << 8) | 20, 20, 0, 0, dostime, dosdate,
+            crc, len(cert_data), len(cert_data),
+            len(fname), 0, 0, 0, 0, external, local_at,
+        ) + fname
 
+        # 重排：原数据前段 + 原CD + 新CD条目 + 新本地条目 + 新EOCD
+        prefix = data[:cd_offset + cd_size]
+        new_cd = data[cd_offset:cd_offset + cd_size] + cd_entry
+        new_total = total + 1
+        new_cd_size = len(new_cd)
+        # EOCD 的 cd_offset 保持原值（V2 定位签名块用），只更新条目数和目录大小
         new_eocd = struct.pack(
             "<IHHHHIIH",
-            0x06054b50,
-            0, 0,
-            (total + 1) & 0xFFFF, (total + 1) & 0xFFFF,
-            len(new_cd),
-            new_eocd_offset,
-            0)
+            0x06054b50, 0, 0,
+            new_total & 0xFFFF, new_total & 0xFFFF,
+            new_cd_size, cd_offset, 0,
+        )
+
+        # local_at 必须在写入前确定：把本地条目放在新CD之后、EOCD之前
+        # 因此 local_at = len(prefix)+len(cd_entry)
+        local_at = len(prefix) + len(cd_entry)
+        cd_entry = struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014b50,
+            (3 << 8) | 20, 20, 0, 0, dostime, dosdate,
+            crc, len(cert_data), len(cert_data),
+            len(fname), 0, 0, 0, 0, external, local_at,
+        ) + fname
+
+        out = prefix + cd_entry + local + new_eocd
 
         with open(signed_apk, "wb") as f:
-            f.write(prefix)
-            f.write(sig_block)
-            f.write(local)
-            f.write(new_cd)
-            f.write(new_eocd)
+            f.write(out)
 
         with zipfile.ZipFile(signed_apk) as z:
             ok = any(re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n, re.I) for n in z.namelist())
         print(f"[check] 最终 APK META-INF cert present: {ok} ({cert_name})")
         return 1 if ok else 0
     except Exception as e:
-        print(f"[warn] 签名后 v2-safe 追加失败: {e}")
+        print(f"[warn] 纯追加失败: {e}")
         return 0
 
 

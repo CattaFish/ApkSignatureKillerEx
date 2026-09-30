@@ -81,16 +81,12 @@ public class KillerApplication extends Application {
             File repFile = originPath != null ? new File(originPath) : null;
             Log.w(TAG, "init: origin exists=" + (repFile != null && repFile.exists()) + " len=" + (repFile != null ? repFile.length() : 0));
             if (repFile == null || !repFile.exists()) return;
+            sRedirectApkPath = repFile.getAbsolutePath();
 
             byte[] signatureBytes = readSignatureFromApk(repFile);
             Log.w(TAG, "init: sig=" + (signatureBytes != null ? signatureBytes.length : "null"));
             if (signatureBytes != null) {
                 try {
-                    try {
-                        File repFile = new File(context.getDataDir(), "signed.apk");
-                        if (repFile.isFile()) sRedirectApkPath = repFile.getAbsolutePath();
-                    } catch (Throwable ignored) {
-                    }
                     cacheOriginalSignature(packageName, signatureBytes);
                     killPM(packageName);
                     installPmProxy(context);
@@ -271,11 +267,6 @@ public class KillerApplication extends Application {
             sSignatureCache.put(packageName, sigs);
             sSignatureMisses.remove(packageName);
             sPmExpectedCert = signatureBytes;
-            try {
-                File repFile = new File(context.getDataDir(), "signed.apk");
-                if (repFile.isFile()) sRedirectApkPath = repFile.getAbsolutePath();
-            } catch (Throwable ignored) {
-            }
         } catch (Throwable e) {
             Log.w(TAG, "cacheOriginalSignature failed for " + packageName, e);
         }
@@ -415,10 +406,18 @@ public class KillerApplication extends Application {
                         @Override
                         public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
                             String name = method.getName();
-                            if (("getPackageInfo".equals(name) || "getApplicationInfo".equals(name))
-                                    && ret instanceof PackageInfo && selfPkg.equals(args[0])) {
-                                replaceAppInfoPaths((PackageInfo) ret);
-                                replacePackageSignatures(selfPkg, (PackageInfo) ret);
+                            Object ret = null;
+                            boolean isGetPkgInfo = ("getPackageInfo".equals(name) || "getApplicationInfo".equals(name));
+                            if (isGetPkgInfo) {
+                                ret = method.invoke(orig, args);
+                                if (ret instanceof PackageInfo
+                                        && args != null && args.length > 0
+                                        && args[0] instanceof String
+                                        && selfPkg.equals(args[0])) {
+                                    replaceAppInfoPaths((PackageInfo) ret);
+                                    replacePackageSignatures(selfPkg, (PackageInfo) ret);
+                                }
+                                return ret;
                             }
                             if ("hasSigningCertificate".equals(name)
                                     && args != null && args.length >= 3
@@ -431,9 +430,7 @@ public class KillerApplication extends Application {
                                     return Boolean.TRUE;
                                 }
                             }
-                            Object ret = method.invoke(orig, args);
-                            return ret;
-                        }
+                            return method.invoke(orig, args);
                     });
             mPmField.set(pm, proxy);
             try {

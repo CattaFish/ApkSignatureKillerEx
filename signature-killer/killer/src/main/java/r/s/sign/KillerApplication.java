@@ -387,6 +387,97 @@ public class KillerApplication extends Application {
         return false;
     }
 
+    public static void onLoaded() {
+        try {
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Method cm = atClass.getDeclaredMethod("currentActivityThread");
+            cm.setAccessible(true);
+            Object at = cm.invoke(null);
+            if (at == null) return;
+            Object bound = findField(atClass, "mBoundApplication").get(at);
+            if (bound == null) return;
+            Object loadedApk = findField(bound.getClass(), "info").get(bound);
+            if (loadedApk == null) return;
+
+            ApplicationInfo ai = null;
+            try {
+                Object o = findField(loadedApk.getClass(), "mApplicationInfo").get(loadedApk);
+                if (o instanceof ApplicationInfo) ai = (ApplicationInfo) o;
+            } catch (Throwable ignored) {}
+            if (ai == null || ai.dataDir == null || ai.packageName == null) return;
+
+            final String packageName = ai.packageName;
+            final String dataDir = ai.dataDir;
+            final String target = dataDir + "/signed.apk";
+            String baseApk = null;
+            try {
+                Object o = findField(loadedApk.getClass(), "mResDir").get(loadedApk);
+                if (o instanceof String) baseApk = (String) o;
+            } catch (Throwable ignored) {}
+
+            // 1) 解出原包（assets/SignedByRS/input.apk -> dataDir/signed.apk）
+            if (!new File(target).isFile()) {
+                try {
+                    File dir = new File(dataDir);
+                    if (!dir.exists()) dir.mkdirs();
+                    File tmp = new File(dataDir, "signed.tmp." + android.os.Process.myPid());
+                    try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(baseApk)) {
+                        java.util.zip.ZipEntry e = zip.getEntry("assets/SignedByRS/input.apk");
+                        if (e == null) return;
+                        try (InputStream is = zip.getInputStream(e);
+                             FileOutputStream fos = new FileOutputStream(tmp)) {
+                            byte[] buf = new byte[8192];
+                            int n;
+                            while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
+                            fos.flush();
+                            fos.getFD().sync();
+                        }
+                    }
+                    if (!tmp.renameTo(new File(target))) { tmp.delete(); return; }
+                } catch (Throwable t) {
+                    Log.w(TAG, "onLoaded: extract failed", t);
+                    return;
+                }
+            }
+
+            // 2) 路径改写（LoadedApk + ApplicationInfo）
+            for (String fld : new String[]{"mResDir", "mCodePath", "mAppDir"}) {
+                try { findField(loadedApk.getClass(), fld).set(loadedApk, target); } catch (Throwable ignored) {}
+            }
+            ai.sourceDir = target;
+            ai.publicSourceDir = target;
+            setPathField(ai, "scanSourceDir", target);
+            setPathField(ai, "scanPublicSourceDir", target);
+            setPathField(ai, "baseCodePath", target);
+            setPathField(ai, "baseResourcePath", target);
+
+            // 3) 签名缓存 + CREATOR 深度替换 + PMS 代理
+            byte[] sig = readSignatureFromApk(new File(target));
+            if (sig != null) {
+                sRedirectApkPath = target;
+                cacheOriginalSignature(packageName, sig);
+                try { killPM(packageName); } catch (Throwable t) { Log.w(TAG, "onLoaded: killPM failed", t); }
+            }
+            try {
+                java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
+                gm.setAccessible(true);
+                Object o = gm.invoke(at);
+                if (o instanceof Context) installPmProxy((Context) o);
+            } catch (Throwable ignored) {}
+
+            // 4) native xhook
+            try {
+                System.loadLibrary("SignedByRS");
+                hookApkPath(baseApk, target);
+            } catch (Throwable t) {
+                Log.w(TAG, "onLoaded: killOpen failed", t);
+            }
+            Log.w(TAG, "onLoaded done for " + packageName);
+        } catch (Throwable t) {
+            Log.w(TAG, "onLoaded failed", t);
+        }
+    }
+
     private static void installPmProxy(Context ctx) {
         try {
             if (ctx == null || sPmExpectedCert == null || !sPmProxyInstalled.compareAndSet(false, true)) {

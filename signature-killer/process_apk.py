@@ -410,7 +410,16 @@ def main():
     shutil.rmtree(WORK, ignore_errors=True)
     os.makedirs(WORK)
 
+        # 两阶段解码：
+    # 1) -s（不反编译 dex）: 得到可编辑的文本 AndroidManifest.xml（资源解码失败不影响）
+    # 2) -s -r（+原始资源）: 得到可供 apktool b 直接复制的 raw res/arsc
+    DECODED_TEXT = os.path.join(WORK, "decoded_text")
+    run(["java", "-jar", args.apktool, "d", "-f", "-s", "-o", DECODED_TEXT, apk_path])
     run(["java", "-jar", args.apktool, "d", "-f", "-s", "-r", "-o", DECODED, apk_path])
+    # 用文本 manifest 覆盖 raw 目录的二进制 manifest（Provider 注入在文本上做）
+    shutil.copy2(os.path.join(DECODED_TEXT, "AndroidManifest.xml"),
+                 os.path.join(DECODED, "AndroidManifest.xml"))
+    shutil.rmtree(DECODED_TEXT, ignore_errors=True)
     print("[ok] apktool d")
 
     manifest_path = os.path.join(DECODED, "AndroidManifest.xml")

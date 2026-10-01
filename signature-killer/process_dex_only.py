@@ -8,6 +8,8 @@ import argparse, datetime, os, re, shutil, subprocess, sys, zipfile
 WORK = "work_out"
 DEX_WORK = os.path.join(WORK, "dexwork")
 KILLER_DEX = "work_killer/classes.dex"
+KILLER_LIB = "work_killer/lib"
+ABIS = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -122,6 +124,29 @@ def main():
     if not find_and_patch(unz, dex_files, rel, a.baksmali, a.smali):
         print("FAIL: 未在任何 dex 找到 Activity")
         sys.exit(1)
+
+    # 注入 native 库：xhook 全链（killOpen/maps 清洗/stat 重定向）依赖 libSignedByRS.so
+    killer_lib = os.path.join(THIS_DIR, KILLER_LIB)
+    injected_so = 0
+    for abi in ABIS:
+        src = os.path.join(killer_lib, abi, "libSignedByRS.so")
+        if os.path.isfile(src):
+            dst_dir = os.path.join(unz, "lib", abi)
+            os.makedirs(dst_dir, exist_ok=True)
+            shutil.copy2(src, os.path.join(dst_dir, "libSignedByRS.so"))
+            injected_so += 1
+            print(f"[ok] lib/{abi}/libSignedByRS.so")
+    if injected_so == 0:
+        print("FAIL: 没有注入 libSignedByRS.so（先运行 prepare 生成 work_killer/lib）")
+        sys.exit(1)
+
+    # 非 dedup：把输入 APK 放进 assets/SignedByRS/input.apk，
+    # 运行时 OriginApkCache.prepare() 才能解出 signed.apk，init() 全链才能跑
+    if not a.dedup:
+        asset_dir = os.path.join(unz, "assets", "SignedByRS")
+        os.makedirs(asset_dir, exist_ok=True)
+        shutil.copy2(a.apk, os.path.join(asset_dir, "input.apk"))
+        print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身（非 dedup）")
 
     if not os.path.isfile(KILLER_DEX):
         print("FAIL: 缺 work_killer/classes.dex")

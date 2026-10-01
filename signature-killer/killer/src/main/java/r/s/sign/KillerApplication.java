@@ -47,6 +47,8 @@ public class KillerApplication extends Application {
     private static byte[] sPmExpectedCert;
     private static String sRedirectApkPath;
     private static final AtomicBoolean sPmProxyInstalled = new AtomicBoolean(false);
+    private static String sBaseApkPath;
+
 
     // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
     @Override
@@ -89,7 +91,7 @@ public class KillerApplication extends Application {
                 try {
                     cacheOriginalSignature(packageName, signatureBytes);
                     killPM(packageName);
-                    installPmProxy(context);
+                    installPmProxy(context, packageName);
                     Log.w(TAG, "init: killPM done");
                 } catch (Throwable t) {
                     Log.e(TAG, "init: killPM threw", t);
@@ -389,6 +391,9 @@ public class KillerApplication extends Application {
 
     public static void onLoaded() {
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                HiddenApiBypass.addHiddenApiExemptions("L");
+            }
             Class<?> atClass = Class.forName("android.app.ActivityThread");
             java.lang.reflect.Method cm = atClass.getDeclaredMethod("currentActivityThread");
             cm.setAccessible(true);
@@ -415,6 +420,7 @@ public class KillerApplication extends Application {
 
             // 期望证书直接从自身 base.apk 的 META-INF/*.RSA 读取（finalize_sign 已置入原证书）
             // 不再解包 signed.apk，避免大包 Application 启动卡死
+            sBaseApkPath = baseApk;
             byte[] sig = readSignatureFromApk(new File(baseApk));
             if (sig == null) {
                 sPmExpectedCert = null;
@@ -427,7 +433,7 @@ public class KillerApplication extends Application {
                 java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
                 gm.setAccessible(true);
                 Object o = gm.invoke(at);
-                if (o instanceof Context) installPmProxy((Context) o);
+                if (o instanceof Context) installPmProxy((Context) o, packageName);
             } catch (Throwable ignored) {}
             Log.w(TAG, "onLoaded done for " + packageName);
         } catch (Throwable t) {
@@ -436,7 +442,7 @@ public class KillerApplication extends Application {
     }
 
 
-    private static void installPmProxy(Context ctx) {
+    private static void installPmProxy(Context ctx, String selfPkg) {
         try {
             if (ctx == null || sPmExpectedCert == null || !sPmProxyInstalled.compareAndSet(false, true)) {
                 return;
@@ -447,7 +453,6 @@ public class KillerApplication extends Application {
             mPmField.setAccessible(true);
             final Object orig = mPmField.get(pm);
             final Class<?> iPmClass = mPmField.getType();
-            final String selfPkg = ctx.getPackageName();
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
                     ctx.getClass().getClassLoader(),
                     new Class<?>[]{iPmClass},
@@ -464,6 +469,18 @@ public class KillerApplication extends Application {
                                         && selfPkg.equals(args[0])) {
                                     replaceAppInfoPaths((PackageInfo) ret);
                                     replacePackageSignatures(selfPkg, (PackageInfo) ret);
+                                }
+                                return ret;
+                            }
+                            if ("getPackageArchiveInfo".equals(name)
+                                    && args != null && args.length > 0
+                                    && args[0] instanceof String
+                                    && getBaseApkPath() != null
+                                    && getBaseApkPath().equals(args[0])) {
+                                Object ret = method.invoke(orig, args);
+                                if (ret instanceof PackageInfo) {
+                                    replacePackageSignatures(selfPkg, (PackageInfo) ret);
+                                    replaceAppInfoPaths((PackageInfo) ret);
                                 }
                                 return ret;
                             }
@@ -504,6 +521,10 @@ public class KillerApplication extends Application {
         } catch (Throwable t) {
             Log.w(TAG, "installPmProxy failed", t);
         }
+    }
+
+    private static String getBaseApkPath() {
+        return sBaseApkPath;
     }
 
     private static void setPathField(ApplicationInfo ai, String field, String path) {

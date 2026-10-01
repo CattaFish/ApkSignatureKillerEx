@@ -25,7 +25,6 @@
 static char *g_apk_path = NULL;
 static char *g_rep_path = NULL;
 static atomic_int g_state = SIGB_STATE_NORMAL;
-static pthread_mutex_t g_rep_id_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 const char *sigb_build_marker(void) {
     return "SIGB_PATH_REWRITE_20261001_829B367";
@@ -214,31 +213,13 @@ int sigb_parse_maps_entry(const char *line, sigb_map_entry_t *entry) {
     return 1;
 }
 
-static __attribute__((unused)) int sigb_path_matches_apk(const char *path) {
-    const char *apk = sigb_get_apk_path();
-    if (path == NULL || path[0] == '\0') return 0;
-    if (apk != NULL) {
-        if (strcmp(path, apk) == 0) return 1;
-        size_t len = strlen(apk);
-        if (strncmp(path, apk, len) == 0 && strcmp(path + len, " (deleted)") == 0) return 1;
-    }
-    /* 加固：覆盖安装变更后的路径变体与 (deleted)，统一重写为 rep 路径 */
-    if (strncmp(path, "/data/app/", 10) == 0 && strstr(path, ".apk") != NULL) return 1;
-    if (strncmp(path, "/data/user/", 11) == 0 && strstr(path, ".apk") != NULL) return 1;
-    if (strncmp(path, "/mnt/expand/", 12) == 0 && strstr(path, ".apk") != NULL) return 1;
-    return 0;
-}
+
+
 
 
 /* 匿名可执行段改写：path 为空且 perms 含 x 的映射改为 r--p。
    目的：堵住 'rwxp' 敏感词行 - 真正的可执行匿名内存是 JIT 的正常行为，
    但检测方常以 rwxp 作为 hook/注入特征。这里只改 perms，不动 start/end。 */
-static __attribute__((unused)) void sigb_neuter_anon_exec(const sigb_map_entry_t *entry, char *perms_out, size_t perms_out_len) {
-    if (entry == NULL || perms_out == NULL || perms_out_len < 5) return;
-    if (entry->path[0] != '\0') return;               /* 只处理匿名映射 */
-    if (strchr(entry->perms, 'x') == NULL) return;    /* 无执行位不动 */
-    snprintf(perms_out, perms_out_len, "r--p");
-}
 
 char *sigb_sanitize_maps(const char *content, int is_smaps) {
     (void)is_smaps;
@@ -254,36 +235,25 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
         size_t line_len = (end != NULL) ? (size_t)(end - pos)
                                         : (size_t)(content + content_len - pos);
         char *line = (char *)malloc(line_len + 1);
-        if (line == NULL) {
-            free(out);
-            return NULL;
-        }
+        if (line == NULL) { free(out); return NULL; }
         memcpy(line, pos, line_len);
         line[line_len] = '\0';
-
         int keep = 1;
         if (sigb_contains_sensitive_word(line)) {
             keep = 0;
         }
-
         if (keep) {
             if (out_pos + line_len + 2 > cap) {
                 size_t new_cap = cap * 2;
                 if (new_cap < out_pos + line_len + 2) new_cap = out_pos + line_len + 2;
                 char *grown = (char *)realloc(out, new_cap);
-                if (grown == NULL) {
-                    free(line);
-                    free(out);
-                    return NULL;
-                }
+                if (grown == NULL) { free(line); free(out); return NULL; }
                 out = grown;
                 cap = new_cap;
             }
             memcpy(out + out_pos, line, line_len);
             out_pos += line_len;
-            if (end != NULL) {
-                out[out_pos++] = '\n';
-            }
+            if (end != NULL) { out[out_pos++] = '\n'; }
         }
         free(line);
         pos = (end != NULL) ? end + 1 : content + content_len;
@@ -291,6 +261,7 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
     out[out_pos] = '\0';
     return out;
 }
+
 
 int sigb_raw_open(const char *path) {
     if (path == NULL) return -1;

@@ -756,9 +756,13 @@ public class MainActivity extends Activity {
         long rawIno = extractIno(statStr, 1);
         boolean pass5 = normalIno > 0 && rawIno > 0;
         boolean hooked5 = normalIno != rawIno;
+        int ch5Color;
+        if (!pass5) ch5Color = Color.RED;
+        else if (hooked5) ch5Color = Color.YELLOW;
+        else ch5Color = Color.BLUE;
         appendProbe(sb, "ch5 stat norm/raw: ",
                 "normal_ino=" + normalIno + " raw_ino=" + rawIno + (hooked5 ? " (HOOKED)" : " (PASS)"),
-                pass5 ? Color.BLUE : Color.RED);
+                ch5Color);
 
         String normMaps = NativeDetector.probeMaps(false);
         String rawMaps = NativeDetector.probeMaps(true);
@@ -789,7 +793,10 @@ public class MainActivity extends Activity {
             pass7 = dimensionSame;
             ch7Mark = pass7 ? "PASS" : "CHECK";
         }
-        int ch7Color = pass7 ? Color.BLUE : Color.RED;
+        int ch7Color;
+        if (!pass7) ch7Color = Color.RED;
+        else if ("HOOKED".equals(ch7Mark)) ch7Color = Color.YELLOW;
+        else ch7Color = Color.BLUE;
         String ch7line = "norm_sens=" + normSens + " raw_sens=" + rawSens
                 + " maps_inode(norm/raw/origin)=" + normApkIno + "/" + rawApkIno + "/" + originIno
                 + " stat_ino(norm/raw)=" + normalIno + "/" + rawIno

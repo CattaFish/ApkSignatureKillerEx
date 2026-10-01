@@ -1,0 +1,8 @@
+BASELINE: workflow 日志显示 finalize_sign.py 空跑 1s 返回，无 processed_*.apk；
+         致命根因：上一轮删除 prepend 函数时把 if __name__==\"__main__\": main() 入口一并删除
+MODIFIED: 补回入口块
+  验证: python3 -m py_compile -> PY_OK
+        python3 finalize_sign.py --help -> exit=2（argparse 生效）
+        tail 显示 if __name__ == "__main__": / main()
+ROLLBACK: bash .task_artifacts/finalize_entry_fix/ROLLBACK.sh
+DIFF:     .task_artifacts/finalize_entry_fix/DIFF.txt

@@ -107,3 +107,5 @@ def main():
     print("[ok] final signed (V2 valid, V1 preserved)")
 
 
+if __name__ == "__main__":
+    main()

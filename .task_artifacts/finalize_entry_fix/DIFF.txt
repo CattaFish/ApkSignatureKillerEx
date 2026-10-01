@@ -1,0 +1,10 @@
+diff --git a/signature-killer/finalize_sign.py b/signature-killer/finalize_sign.py
+index 11e0eed..47ea566 100644
+--- a/signature-killer/finalize_sign.py
++++ b/signature-killer/finalize_sign.py
+@@ -107,3 +107,5 @@ def main():
+     print("[ok] final signed (V2 valid, V1 preserved)")
+ 
+ 
++if __name__ == "__main__":
++    main()

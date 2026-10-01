@@ -398,7 +398,7 @@ def main():
     shutil.rmtree(WORK, ignore_errors=True)
     os.makedirs(WORK)
 
-    run(["java", "-jar", args.apktool, "d", "-f", "-o", DECODED, apk_path])
+    run(["java", "-jar", args.apktool, "d", "-f", "-s", "-o", DECODED, apk_path])
     print("[ok] apktool d")
 
     manifest_path = os.path.join(DECODED, "AndroidManifest.xml")
@@ -434,18 +434,6 @@ def main():
         print(f"FAIL: {KILLER_SMALI} 不存在（先运行 prepare 生成 work_killer）")
         sys.exit(1)
 
-    smali_target = os.path.join(DECODED, "smali")
-    os.makedirs(smali_target, exist_ok=True)
-    smali_injected = 0
-    for item in os.listdir(KILLER_SMALI):
-        src = os.path.join(KILLER_SMALI, item)
-        dst = os.path.join(smali_target, item)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src, dst)
-        smali_injected += 1
-    print(f"[ok] killer smali 合并到主 dex {smali_target}（{smali_injected} 项）")
 
     # 动态签名期望值：替换 MainActivity.smali 里硬编码的 expected MD5
     expected = get_apk_signature_md5(apk_path)
@@ -482,6 +470,24 @@ def main():
         print(f"[ok] KillerProvider 已注入 (authorities={package}.killerprovider)")
 
     run(["java", "-jar", args.apktool, "b", DECODED, "-o", os.path.join(WORK, "unsigned.apk")])
+
+    # 追加 killer dex（d8 产物，不反编译原 dex）：作为新 classesN.dex
+    import zipfile as _zi
+    _killer_dex = os.path.join(KILLER_SMALI, "..", "classes.dex")
+    if not os.path.isfile(_killer_dex):
+        _killer_dex = os.path.join(os.path.dirname(KILLER_SMALI), "classes.dex")
+    if os.path.isfile(_killer_dex):
+        _unsigned = os.path.join(WORK, "unsigned.apk")
+        with _zi.ZipFile(_unsigned, "a") as _zout:
+            _names = set(_zout.namelist())
+            _n = 2
+            while f"classes{_n}.dex" in _names:
+                _n += 1
+            _entry = f"classes{_n}.dex"
+            _zout.write(_killer_dex, _entry)
+            print(f"[ok] killer dex -> {_entry}")
+    else:
+        print("[warn] 未找到 killer classes.dex，跳过 dex 注入")
 
     # 原证书注入：native 从外层 APK META-INF 解析原签名（apktool build 后 zip 级注入）
     inject_original_meta_inf(apk_path, os.path.join(WORK, "unsigned.apk"))

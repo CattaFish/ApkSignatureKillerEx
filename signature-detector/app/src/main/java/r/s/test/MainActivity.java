@@ -581,39 +581,12 @@ public class MainActivity extends Activity {
 
     
     private String resolveExpectedSignature() {
-        byte[] selfSig = null;
-        try {
-            selfSig = signatureFromAPI();
-        } catch (Throwable ignored) {
-        }
-        byte[] repSig = null;
-        File rep = new File(getApplicationInfo().dataDir, "signed.apk");
-        if (rep.isFile() && rep.length() > 0) {
-            repSig = signatureFromApkFile(rep);
-        }
-        byte[] expected;
-        if (repSig != null && selfSig != null && MessageDigest.isEqual(repSig, selfSig)) {
-            // killer 生效：API 注入签名 == 内嵌 input 签名（唯一可信场景）
-            expected = repSig;
-        } else if (selfSig != null) {
-            // 干净安装，或 signed.apk 为旧安装残留：以当前安装为准
-            expected = selfSig;
-        } else if (repSig != null) {
-            expected = repSig;
-        } else {
-            return "1fb11e8214ae8b8c259aa9cd87387ac0";
-        }
-        String resolved = md5(expected);
-        String source;
-        if (repSig != null && selfSig != null && MessageDigest.isEqual(repSig, selfSig)) {
-            source = "signed.apk";
-        } else if (selfSig != null) {
-            source = "current-install";
-        } else {
-            source = "signed.apk-only";
-        }
-        Log.i("SigDetector", "Dynamic Expected=" + resolved + " source=" + source);
-        return resolved;
+        // 期望签名固定为本 APK 原始构建签名（origin.jks）。
+        // 不再从运行时 selfSig/repSig 推断，避免重签/替换后 Expected 被污染、
+        // 探针全部跟着变绿。任何重签都会让对比行变红。
+        // 注：killer 处理时会通过 smali 字符串替换把这个固定值换成目标原包签名，
+        //     故不影响 killer 动态场景。
+        return "1fb11e8214ae8b8c259aa9cd87387ac0";
     }
 
     private static byte[] signatureFromApkFile(File apkFile) {

@@ -14,9 +14,9 @@ on:
         required: false
         type: string
       mode:
-        description: '处理模式: apktool(默认) 或 dexonly(资源混淆大包如QQ)'
+        description: '处理模式: dexonly(默认,不动资源/manifest) 或 apktool(需改资源时)'
         required: false
-        default: 'apktool'
+        default: 'dexonly'
         type: string
 
 jobs:

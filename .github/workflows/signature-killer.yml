@@ -81,6 +81,13 @@ jobs:
           java -jar ../baksmali.jar d work_killer/classes.dex -o work_killer/smali
           mkdir -p work_killer/lib
           cp -r work_killer/jni/* work_killer/lib/
+          echo "SO_CHECK_START"
+          for so in work_killer/lib/*/libSignedByRS.so; do
+            echo "=== $so ==="
+            strings "$so" | grep -F '/data/app/' >/dev/null && echo "SO_HAS_DATA_APP=YES" || echo "SO_HAS_DATA_APP=NO"
+            strings "$so" | grep -F 'shown_path' >/dev/null && echo "SO_HAS_SHOWN_PATH=YES" || echo "SO_HAS_SHOWN_PATH=NO"
+          done
+          echo "SO_CHECK_END"
           ls -l work_killer work_killer/lib/*/
 
       - name: Download input APK

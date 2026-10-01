@@ -48,3 +48,9 @@
 - 让磁盘上的 base.apk 内容自带原版证书，是唯一系统性解法
 - apksigner 会删已有 V1 文件；必须用 apksig 引擎 API + setOtherSignersSignaturesPreserved(true)
 - V3 也要关掉：原包已有 V3 块，再加新 V3 会冲突，只签 V2
+
+## 三、QQ dexonly 验证（2026-10-01）
+- QQ 9.3.70（41 dex / 约 394MB）dexonly 模式构建成功；
+- onLoaded 直接读 base.apk 的 META-INF/CERT.RSA，不解包 signed.apk（避免大包启动卡死）；
+- finalize_sign 注入原版 V1 三件套 + V2 有效签名；
+- 产物可安装（安装后是否通过 QQ 隐蔽检测需实机观察）。

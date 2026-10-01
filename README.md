@@ -64,3 +64,13 @@ push 触发时只构建并上传 `killer-aar`；`workflow_dispatch` 时执行完
 - `hasSigningCertificate`：仅自研 IPackageManager 代理覆盖，不适用于直接读系统侧签名的极端场景；
 - 目标若校验磁盘 base.apk 的完整字节摘要（而非仅证书），现有方案无法覆盖；
 - 仅 Android 7.0+ 且系统支持 V2 签名验证的设备上免 root 安装成立。
+
+## dexonly 模式（大包/资源混淆）
+
+入口：workflow 的 mode 选 `dexonly`（默认）。
+
+- 不解码/重编资源，不动 AndroidManifest；
+- 直接在目标 Application 的 `<clinit>` 第一条指令插入 `KillerApplication.onLoaded()`（manifest 零改动）；
+- 重打包时追加 killer dex；
+- finalize_sign 把原版 META-INF/CERT.RSA/SF/MF 注入 + V2 有效签名；
+- 适合 QQ/微信类资源混淆大包。

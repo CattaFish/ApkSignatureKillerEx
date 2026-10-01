@@ -147,8 +147,10 @@ public class MainActivity extends Activity {
 
         String realApkPath = extractRealApkPathFromMaps();
         String crossInfo = probeV1V2Cross(realApkPath);
-        boolean crossSplit = crossInfo.contains("(SPLIT)") || crossInfo.contains("(FAKE)");
-        append(sb, "A1 V1/V2 Cross: ", crossInfo, crossSplit ? Color.RED : Color.BLUE);
+        // 只有 v1==v2==Expected（原始签名且自洽）才算通过；其他一律红
+        boolean crossOk = crossInfo.contains("(SAME)")
+                && crossInfo.startsWith("v1=" + signatureExpected);
+        append(sb, "A1 V1/V2 Cross: ", crossInfo, crossOk ? Color.BLUE : Color.RED);
         // ---- end stage 1.5 probes ----
         append(sb, "V2DBG: ", v2LastError == null ? "ok" : v2LastError, Color.GRAY);
 

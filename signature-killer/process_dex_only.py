@@ -32,9 +32,22 @@ def get_activity(apk, apktool):
     man_dir = os.path.join(DEX_WORK, "manifest_text")
     shutil.rmtree(DEX_WORK, ignore_errors=True)
     os.makedirs(DEX_WORK, exist_ok=True)
-    # -s -r: no dex, raw resources, but text manifest
-    run(["java", "-jar", apktool, "d", "-f", "-s", "-r", "-o", man_dir, apk])
-    man = open(os.path.join(man_dir, "AndroidManifest.xml"), encoding="utf-8").read()
+    # -s（不反编译 dex，manifest 解码为文本）；dexonly 不重编译资源，-r 不需要
+    run(["java", "-jar", apktool, "d", "-f", "-s", "-o", man_dir, apk])
+    _man_path = os.path.join(man_dir, "AndroidManifest.xml")
+    man = open(_man_path, encoding="utf-8", errors="replace").read()
+    if "<manifest" not in man:
+        print("[warn] AndroidManifest.xml 非文本，尝试 binary fallback")
+        import re as _re
+        blob = open(_man_path, "rb").read()
+        # 二进制 AXML 中 activity 类名仍以完整字符串存在
+        cand = _re.findall(rb'[a-zA-Z_][a-zA-Z0-9_.]{10,120}\.activity\.[a-zA-Z0-9_.]+', blob)
+        if cand:
+            cls = cand[-1].decode(errors="replace")
+            print("[info] binary activity:", cls)
+            return cls
+        # 最后尝试 treat as text with errors replaced
+        man = open(_man_path, encoding="utf-8", errors="replace").read()
     m = re.search(r'<activity\b[^>]*\bandroid:name="([^"]+)"', man)
     if not m:
         print("FAIL: no activity android:name")

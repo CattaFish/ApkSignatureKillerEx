@@ -434,7 +434,20 @@ public class KillerApplication extends Application {
                 gm.setAccessible(true);
                 Object o = gm.invoke(at);
                 if (o instanceof Context) installPmProxy((Context) o, packageName);
+                if (o instanceof Context) {
+                    try {
+                        OriginApkCache.prepare((Context) o);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "onLoaded: OriginApkCache.prepare failed", t);
+                    }
+                }
             } catch (Throwable ignored) {}
+            try {
+                killOpen(packageName);
+                Log.w(TAG, "onLoaded: killOpen done");
+            } catch (Throwable t) {
+                Log.w(TAG, "onLoaded: killOpen failed", t);
+            }
             Log.w(TAG, "onLoaded done for " + packageName);
         } catch (Throwable t) {
             Log.w(TAG, "onLoaded failed", t);

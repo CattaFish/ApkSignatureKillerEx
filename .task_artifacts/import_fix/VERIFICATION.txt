@@ -1,0 +1,6 @@
+BASELINE: workflow 失败 NameError: name 'struct' is not defined
+MODIFIED: import 补齐 struct/base64/hashlib
+  python3 -m py_compile -> PY_OK
+  hasattr(finalize_sign, struct/base64/hashlib/prepend_original_v2_pair) 全 True
+ROLLBACK: bash .task_artifacts/import_fix/ROLLBACK.sh
+DIFF:     .task_artifacts/import_fix/DIFF.txt

@@ -1,0 +1,12 @@
+diff --git a/signature-killer/finalize_sign.py b/signature-killer/finalize_sign.py
+index c1de138..926ee8f 100644
+--- a/signature-killer/finalize_sign.py
++++ b/signature-killer/finalize_sign.py
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env python3
+ """Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only (preserve V1)."""
+-import argparse, os, re, shutil, subprocess, sys, tempfile, zipfile
++import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile
+ 
+ KEY_DIR = "work_killer"
+ 

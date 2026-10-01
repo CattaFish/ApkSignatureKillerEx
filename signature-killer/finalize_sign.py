@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only (preserve V1)."""
-import argparse, os, re, shutil, subprocess, sys, tempfile, zipfile
+import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile
 
 KEY_DIR = "work_killer"
 

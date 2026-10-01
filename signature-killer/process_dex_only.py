@@ -105,6 +105,7 @@ def main():
     ap.add_argument("--baksmali", required=True)
     ap.add_argument("--smali", required=True)
     ap.add_argument("--output", required=True)
+    ap.add_argument("--dedup", action="store_true", help="remove assets/SignedByRS/input.apk copy")
     a = ap.parse_args()
 
     activity = get_activity(a.apk, a.apktool)
@@ -134,11 +135,17 @@ def main():
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     unsigned = os.path.join(WORK, f"dex_only_unsigned_{ts}.apk")
+    skip_set = set()
+    if a.dedup:
+        skip_set.add("assets/SignedByRS/input.apk")
+        print("[dedup] 移除 assets/SignedByRS/input.apk 副本")
     with zipfile.ZipFile(unsigned, "w") as zout:
         for root, dirs, files in os.walk(unz):
             for f in files:
                 full = os.path.join(root, f)
                 relf = os.path.relpath(full, unz)
+                if relf.replace("\\", "/") in skip_set:
+                    continue
                 zout.write(full, relf)
         zout.write(KILLER_DEX, new_dex_name)
         print(f"[ok] killer dex -> {new_dex_name}")

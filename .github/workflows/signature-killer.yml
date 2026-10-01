@@ -18,6 +18,11 @@ on:
         required: false
         default: 'dexonly'
         type: string
+      dedup:
+        description: '数据复用优化：删除 assets/SignedByRS/input.apk 副本，产物≈原包大小'
+        required: false
+        default: 'true'
+        type: boolean
 
 jobs:
   process:
@@ -95,9 +100,11 @@ jobs:
             python3 process_dex_only.py --apk input.apk \
               --apktool "$APKTOOL_JAR" --baksmali ../baksmali.jar \
               --smali ../smali.jar \
-              --output work_out/processed_$(date +%Y%m%d_%H%M%S).apk
+              --output work_out/processed_$(date +%Y%m%d_%H%M%S).apk \
+              $([ "${{ github.event.inputs.dedup }}" = "true" ] && echo --dedup)
           else
-            python3 process_apk.py --apk input.apk
+            python3 process_apk.py --apk input.apk \
+              $([ "${{ github.event.inputs.dedup }}" = "true" ] && echo --dedup)
           fi
 
       - name: Upload processed APK

@@ -223,6 +223,7 @@ def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
     parser.add_argument("--apktool", default=os.environ.get("APKTOOL_JAR", "apktool.jar"))
+    parser.add_argument("--dedup", action="store_true", help="删除 assets/SignedByRS/input.apk 副本（数据复用优化）")
     args = parser.parse_args()
 
     apk_path = os.path.abspath(args.apk)
@@ -256,10 +257,13 @@ def main():
     package = m.group(1)
     print(f"[info] package = {package}")
 
-    asset_dir = os.path.join(DECODED, "assets", "SignedByRS")
-    os.makedirs(asset_dir, exist_ok=True)
-    shutil.copy(apk_path, os.path.join(asset_dir, "input.apk"))
-    print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身")
+    if args.dedup:
+        print("[dedup] 跳过 assets/SignedByRS/input.apk 复制（运行时直接读 base.apk META-INF 原证书）")
+    else:
+        asset_dir = os.path.join(DECODED, "assets", "SignedByRS")
+        os.makedirs(asset_dir, exist_ok=True)
+        shutil.copy(apk_path, os.path.join(asset_dir, "input.apk"))
+        print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身")
 
     injected = 0
     for abi in ABIS:
@@ -299,6 +303,12 @@ def main():
         print(f"[ok] 签名期望值已更新: {expected} ({n} 处)")
     else:
         print("[warn] 无法解析输入 APK 的 v1 签名，跳过期望值替换（界面红蓝判断可能失真）")
+
+    if args.dedup:
+        _residual = os.path.join(DECODED, "assets", "SignedByRS", "input.apk")
+        if os.path.isfile(_residual):
+            os.remove(_residual)
+            print("[dedup] 已删除残留 input.apk")
 
     run(["java", "-jar", args.apktool, "b", DECODED, "-o", os.path.join(WORK, "unsigned.apk")])
     print("[ok] apktool b")

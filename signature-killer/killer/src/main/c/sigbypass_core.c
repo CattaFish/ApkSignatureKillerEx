@@ -313,6 +313,7 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
         } else if (!is_smaps) {
             sigb_map_entry_t entry;
             if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {
+                XH_LOG_WARN("MAP_APK_LINE: %s", line);
                 char dev[32] = {0};
                 unsigned long long ino = 0;
                 const char *shown_path = sigb_get_rep_path();
@@ -331,6 +332,8 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
                         free(out);
                         return NULL;
                     }
+                    XH_LOG_WARN("MAP_APK_REWRITE: %s -> %s", entry.path, shown_path);
+                    XH_LOG_WARN("MAP_APK_AFTER: %s", rewritten);
                     line_len = strlen(line);
                 }
             }

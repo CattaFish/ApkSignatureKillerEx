@@ -212,10 +212,17 @@ int sigb_parse_maps_entry(const char *line, sigb_map_entry_t *entry) {
 
 static int sigb_path_matches_apk(const char *path) {
     const char *apk = sigb_get_apk_path();
-    if (path == NULL || apk == NULL || path[0] == '\0') return 0;
-    if (strcmp(path, apk) == 0) return 1;
-    size_t len = strlen(apk);
-    return strncmp(path, apk, len) == 0 && strcmp(path + len, " (deleted)") == 0;
+    if (path == NULL || path[0] == '\0') return 0;
+    if (apk != NULL) {
+        if (strcmp(path, apk) == 0) return 1;
+        size_t len = strlen(apk);
+        if (strncmp(path, apk, len) == 0 && strcmp(path + len, " (deleted)") == 0) return 1;
+    }
+    /* 加固：覆盖安装变更后的路径变体与 (deleted)，统一重写为 rep 路径 */
+    if (strncmp(path, "/data/app/", 10) == 0 && strstr(path, ".apk") != NULL) return 1;
+    if (strncmp(path, "/data/user/", 11) == 0 && strstr(path, ".apk") != NULL) return 1;
+    if (strncmp(path, "/mnt/expand/", 12) == 0 && strstr(path, ".apk") != NULL) return 1;
+    return 0;
 }
 
 static int sigb_query_rep_id(char *dev_out, size_t dev_size, unsigned long long *inode_out) {

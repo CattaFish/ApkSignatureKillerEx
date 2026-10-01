@@ -168,50 +168,6 @@ int sigb_create_memfd(const char *name, const char *content, size_t len) {
     return fd;
 }
 
-int sigb_parse_maps_entry(const char *line, sigb_map_entry_t *entry) {
-    if (line == NULL || entry == NULL) return 0;
-    unsigned long start = 0;
-    unsigned long end = 0;
-    unsigned long offset = 0;
-    unsigned long long inode = 0;
-    char perms[8] = {0};
-    char dev[32] = {0};
-    int consumed = 0;
-    int fields = sscanf(line, "%lx-%lx %7s %lx %31s %llu%n",
-                        &start, &end, perms, &offset, dev, &inode, &consumed);
-    if (fields < 4) return 0;
-
-    memset(entry, 0, sizeof(*entry));
-    entry->start = start;
-    entry->end = end;
-    entry->offset = offset;
-    entry->inode = (fields >= 6) ? inode : 0;
-
-    size_t perms_len = strlen(perms);
-    if (perms_len >= sizeof(entry->perms)) perms_len = sizeof(entry->perms) - 1;
-    memcpy(entry->perms, perms, perms_len);
-    entry->perms[perms_len] = '\0';
-
-    if (fields >= 5) {
-        size_t dev_len = strlen(dev);
-        if (dev_len >= sizeof(entry->dev)) dev_len = sizeof(entry->dev) - 1;
-        memcpy(entry->dev, dev, dev_len);
-        entry->dev[dev_len] = '\0';
-    }
-
-    if (fields >= 6 && consumed > 0) {
-        const char *p = line + consumed;
-        while (*p == ' ' || *p == '\t') ++p;
-        size_t plen = strlen(p);
-        while (plen > 0 && (p[plen - 1] == '\n' || p[plen - 1] == '\r')) --plen;
-        if (plen > 0) {
-            if (plen >= sizeof(entry->path)) plen = sizeof(entry->path) - 1;
-            memcpy(entry->path, p, plen);
-            entry->path[plen] = '\0';
-        }
-    }
-    return 1;
-}
 
 
 

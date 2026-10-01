@@ -429,24 +429,41 @@ public class KillerApplication extends Application {
                 cacheOriginalSignature(packageName, sig);
                 try { killPM(packageName); } catch (Throwable t) { Log.w(TAG, "onLoaded: killPM failed", t); }
             }
+            Context appCtx = null;
             try {
-                java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
-                gm.setAccessible(true);
-                Object o = gm.invoke(at);
-                if (o instanceof Context) installPmProxy((Context) o, packageName);
-                if (o instanceof Context) {
-                    try {
-                        String rep = OriginApkCache.prepare((Context) o);
-                        if (rep != null) {
-                            sRedirectApkPath = rep;
+                Object all = findField(atClass, "mAllApplications").get(at);
+                if (all instanceof java.util.List) {
+                    for (Object appObj : (java.util.List<?>) all) {
+                        if (appObj instanceof Application) {
+                            appCtx = (Application) appObj;
+                            break;
                         }
-                        redirectApkPaths((Context) o);
-                        Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + sRedirectApkPath);
-                    } catch (Throwable t) {
-                        Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                     }
                 }
             } catch (Throwable ignored) {}
+            if (appCtx == null) {
+                try {
+                    java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
+                    gm.setAccessible(true);
+                    Object o = gm.invoke(at);
+                    if (o instanceof Context) appCtx = (Context) o;
+                } catch (Throwable ignored) {}
+            }
+            if (appCtx != null) {
+                installPmProxy(appCtx, packageName);
+                try {
+                    String rep = OriginApkCache.prepare(appCtx);
+                    if (rep != null) {
+                        sRedirectApkPath = rep;
+                    } else {
+                        Log.w(TAG, "onLoaded: prepare returned null (assets/SignedByRS/input.apk 缺失?)");
+                    }
+                    redirectApkPaths(appCtx);
+                    Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + sRedirectApkPath);
+                } catch (Throwable t) {
+                    Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
+                }
+            }
             try {
                 killOpen(packageName);
                 Log.w(TAG, "onLoaded: killOpen done");

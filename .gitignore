@@ -1,18 +1,14 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+# Python
+__pycache__/
+*.pyc
 
-**/build/
-**/.gradle/
+# 构建产物
+signature-killer/work_killer/
+work_out/
+
+# 测试/临时
+*.apk
+!signature-detector/app/build/outputs/**/*.apk
+keys/
+.v2test/
+.tp_work/

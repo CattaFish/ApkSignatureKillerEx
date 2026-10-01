@@ -194,6 +194,7 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     const char *apk_path = (*env)->GetStringUTFChars(env, apkPath, 0);
     const char *rep_path = (*env)->GetStringUTFChars(env, repPath, 0);
     sigb_set_target_paths(apk_path, rep_path);
+    XH_LOG_WARN("SIGB_BUILD_MARKER=%s", sigb_build_marker());
     (*env)->ReleaseStringUTFChars(env, apkPath, apk_path);
     (*env)->ReleaseStringUTFChars(env, repPath, rep_path);
 

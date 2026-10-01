@@ -27,6 +27,10 @@ static char *g_rep_path = NULL;
 static atomic_int g_state = SIGB_STATE_NORMAL;
 static pthread_mutex_t g_rep_id_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+const char *sigb_build_marker(void) {
+    return "SIGB_PATH_REWRITE_20261001_829B367";
+}
+
 static char *dup_str(const char *s) {
     if (s == NULL) return NULL;
     size_t len = strlen(s);

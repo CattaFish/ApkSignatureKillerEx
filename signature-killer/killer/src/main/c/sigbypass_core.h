@@ -48,6 +48,7 @@ char *sigb_raw_read_fd(int fd);
 char *sigb_raw_readlink(const char *path);
 int sigb_should_sanitize_proc(const char *path);
 int sigb_maybe_relevant(const char *path);
+const char *sigb_build_marker(void);
 
 #ifdef __cplusplus
 }

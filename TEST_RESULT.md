@@ -70,3 +70,10 @@
 ## 六、V2Block 外部解析探针（2026-10-01）
 - detector 新增 From V2Block（正常读，验证 xhook 重定向）与 From V2Block SVC（raw syscall 直读 base.apk，模拟外部 native 直解析 APK Signing Block v2/v3）；
 - From V2Block SVC 在 killer 处理后的 APK 上必然红：V2 块内是新证书（免 root 结构性死穴），该探针用于自证方案边界。
+## 七、13 行探针闭环（2026-10-01，killer dexonly 非 dedup）
+- detector v13.1 处理闭环：11 行添加 From V2Block / From V2Block SVC 后全链路验证；
+- 绿（12/13）：From API / From APK / From SVC / From SigningInfo / hasSigningCertificate /
+  From ArchiveInfo / From V2Block / ch4 / ch5(HOOKED) / ch7(HOOKED) / ch9 / Expected[auto]；
+- 红（1/13，预期）：From V2Block SVC = 0dddcddc…（raw syscall 直读 base.apk V2 块 → fake 证书）；
+- 边界结论：xhook 全链（open/stat/maps）与 PmProxy（hasSigningCertificate/getPackageArchiveInfo）
+  已覆盖所有用户态路径；raw syscall 解析 V2 块是免 root 架构结构性死角，非代码可修。

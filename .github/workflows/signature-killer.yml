@@ -56,6 +56,9 @@ jobs:
       - name: Build killer module
         working-directory: signature-killer
         run: |
+          echo "SOURCE_HASH_BEGIN"
+          md5sum killer/src/main/c/sigbypass_core.c | cut -d' ' -f1
+          echo "SOURCE_HASH_END"
           ./gradlew :killer:clean --stacktrace
           rm -rf killer/build
           ./gradlew :killer:assembleRelease --stacktrace
@@ -84,6 +87,9 @@ jobs:
           java -jar ../baksmali.jar d work_killer/classes.dex -o work_killer/smali
           mkdir -p work_killer/lib
           cp -r work_killer/jni/* work_killer/lib/
+          echo "CMAKE_LIST_BEGIN"
+          cat killer/CMakeLists.txt || true
+          echo "CMAKE_LIST_END"
           echo "SO_CHECK_START"
           so_ok=1
           for so in work_killer/lib/*/libSignedByRS.so; do

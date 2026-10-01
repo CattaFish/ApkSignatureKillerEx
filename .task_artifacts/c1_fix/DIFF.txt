@@ -1,0 +1,66 @@
+diff --git a/signature-detector/app/src/main/java/r/s/test/MainActivity.java b/signature-detector/app/src/main/java/r/s/test/MainActivity.java
+index 8964cca..15500a1 100644
+--- a/signature-detector/app/src/main/java/r/s/test/MainActivity.java
++++ b/signature-detector/app/src/main/java/r/s/test/MainActivity.java
+@@ -138,10 +138,10 @@ public class MainActivity extends Activity {
+                 sigV2BlockSvc != null && signatureExpected.equals(strV2BlockSvc) ? Color.BLUE : Color.RED);
+ 
+         // ---- stage 2 probes: 绕开 getPackageResourcePath() 的信息来源 ----
+-        String realApkPath = extractRealApkPathFromMaps();
++        String normApkPath = extractNormalApkPathFromMaps();
+         String pathRes = getPackageResourcePath();
+-        boolean pathRedirected = realApkPath != null && !realApkPath.equals(pathRes);
+-        String pathLine = "res=" + pathRes + " maps=" + (realApkPath != null ? realApkPath : "?")
++        boolean pathRedirected = normApkPath != null && !normApkPath.equals(pathRes);
++        String pathLine = "res=" + pathRes + " maps=" + (normApkPath != null ? normApkPath : "?")
+                 + (pathRedirected ? " (REDIRECTED)" : " (SAME)");
+         append(sb, "C1 PathDiff: ", pathLine, pathRedirected ? Color.RED : Color.BLUE);
+ 
+@@ -252,6 +252,25 @@ public class MainActivity extends Activity {
+         return signatureFromApkSigningBlockBytes(apkBytes);
+     }
+ 
++    private String extractNormalApkPathFromMaps() {
++        try {
++            String maps = NativeDetector.probeMaps(false);
++            if (maps == null) return null;
++            String pkg = getPackageName();
++            for (String line : maps.split("\\n")) {
++                String[] arr = line.split("\\s+");
++                if (arr.length == 0) continue;
++                String path = arr[arr.length - 1];
++                if (!path.startsWith("/") || !path.endsWith(".apk")) continue;
++                if (path.contains(pkg) || (path.contains("/app/") && path.endsWith("base.apk"))) {
++                    return path;
++                }
++            }
++        } catch (Throwable ignored) {
++        }
++        return null;
++    }
++
+     private String extractRealApkPathFromMaps() {
+         try {
+             String maps = NativeDetector.probeMaps(true);
+diff --git a/signature-killer/killer/src/main/c/sigbypass_core.c b/signature-killer/killer/src/main/c/sigbypass_core.c
+index a7f42e4..9e04b0a 100644
+--- a/signature-killer/killer/src/main/c/sigbypass_core.c
++++ b/signature-killer/killer/src/main/c/sigbypass_core.c
+@@ -304,12 +304,16 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
+             if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {
+                 char dev[32] = {0};
+                 unsigned long long ino = 0;
++                const char *shown_path = sigb_get_rep_path();
++                if (shown_path == NULL) {
++                    shown_path = entry.path;
++                }
+                 if (sigb_get_rep_id_cached(dev, sizeof(dev), &ino)) {
+                     char rewritten[PATH_MAX + 128];
+                     snprintf(rewritten, sizeof(rewritten),
+                              "%012lx-%012lx %s %08lx %s %llu %s",
+                              entry.start, entry.end, entry.perms,
+-                             entry.offset, dev, ino, entry.path);
++                             entry.offset, dev, ino, shown_path);
+                     free(line);
+                     line = dup_str(rewritten);
+                     if (line == NULL) {

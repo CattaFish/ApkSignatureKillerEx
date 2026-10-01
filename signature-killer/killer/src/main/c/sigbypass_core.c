@@ -304,12 +304,16 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
             if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {
                 char dev[32] = {0};
                 unsigned long long ino = 0;
+                const char *shown_path = sigb_get_rep_path();
+                if (shown_path == NULL) {
+                    shown_path = entry.path;
+                }
                 if (sigb_get_rep_id_cached(dev, sizeof(dev), &ino)) {
                     char rewritten[PATH_MAX + 128];
                     snprintf(rewritten, sizeof(rewritten),
                              "%012lx-%012lx %s %08lx %s %llu %s",
                              entry.start, entry.end, entry.perms,
-                             entry.offset, dev, ino, entry.path);
+                             entry.offset, dev, ino, shown_path);
                     free(line);
                     line = dup_str(rewritten);
                     if (line == NULL) {

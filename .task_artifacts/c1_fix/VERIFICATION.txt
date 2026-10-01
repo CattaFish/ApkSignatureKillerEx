@@ -1,0 +1,6 @@
+BASELINE: 上一轮提交 15 行探针（C1 REDIRECTED 红 / A1 SPLIT 红）
+MODIFIED: killer sanitize_maps 路径重写 rep_path；detector C1 用 normal 视图
+  - C brace: 0 paren: 0；Java brace: 0 paren: 0
+  - C1 预期 res=/data/user/0/r.s.sign/signed.apk maps=signed.apk (SAME) 绿
+  - A1 保持 raw 视图，仍暴露真实包 V1/V2 SPLIT 红（下轮处理）
+ROLLBACK: bash .task_artifacts/c1_fix/ROLLBACK.sh

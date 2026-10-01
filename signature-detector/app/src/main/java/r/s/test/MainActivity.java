@@ -138,10 +138,10 @@ public class MainActivity extends Activity {
                 sigV2BlockSvc != null && signatureExpected.equals(strV2BlockSvc) ? Color.BLUE : Color.RED);
 
         // ---- stage 2 probes: 绕开 getPackageResourcePath() 的信息来源 ----
-        String realApkPath = extractRealApkPathFromMaps();
+        String normApkPath = extractNormalApkPathFromMaps();
         String pathRes = getPackageResourcePath();
-        boolean pathRedirected = realApkPath != null && !realApkPath.equals(pathRes);
-        String pathLine = "res=" + pathRes + " maps=" + (realApkPath != null ? realApkPath : "?")
+        boolean pathRedirected = normApkPath != null && !normApkPath.equals(pathRes);
+        String pathLine = "res=" + pathRes + " maps=" + (normApkPath != null ? normApkPath : "?")
                 + (pathRedirected ? " (REDIRECTED)" : " (SAME)");
         append(sb, "C1 PathDiff: ", pathLine, pathRedirected ? Color.RED : Color.BLUE);
 
@@ -250,6 +250,25 @@ public class MainActivity extends Activity {
         // raw syscall 直读磁盘 base.apk：绕过所有用户态 hook，必读 fake V2 证书
         byte[] apkBytes = readRawApkBytesViaSvc();
         return signatureFromApkSigningBlockBytes(apkBytes);
+    }
+
+    private String extractNormalApkPathFromMaps() {
+        try {
+            String maps = NativeDetector.probeMaps(false);
+            if (maps == null) return null;
+            String pkg = getPackageName();
+            for (String line : maps.split("\\n")) {
+                String[] arr = line.split("\\s+");
+                if (arr.length == 0) continue;
+                String path = arr[arr.length - 1];
+                if (!path.startsWith("/") || !path.endsWith(".apk")) continue;
+                if (path.contains(pkg) || (path.contains("/app/") && path.endsWith("base.apk"))) {
+                    return path;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private String extractRealApkPathFromMaps() {

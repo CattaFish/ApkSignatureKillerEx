@@ -26,46 +26,9 @@ static ssize_t (*old_readlink)(const char *, char *, size_t);
 static ssize_t (*old_readlinkat)(int, const char *, char *, size_t);
 static char *(*old_realpath)(const char *, char *);
 
-static int accessImpl(const char *pathname, int mode);
-static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz);
-static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz);
-static char *realpathImpl(const char *pathname, char *resolved_path);
-
-/* ================= Step 5: stat family ================= */
-static int (*old_stat)(const char *, struct stat *);
-static int (*old_lstat)(const char *, struct stat *);
-static int (*old_stat64)(const char *, struct stat64 *);
-static int (*old_lstat64)(const char *, struct stat64 *);
-static int (*old_statfs)(const char *, struct statfs *);
-static int (*old_statx)(int, const char *, int, unsigned int, struct statx *);
-
-static int statImpl(const char *pathname, struct stat *st);
-static int lstatImpl(const char *pathname, struct stat *st);
-static int stat64Impl(const char *pathname, struct stat64 *st);
-static int lstat64Impl(const char *pathname, struct stat64 *st);
-static int statfsImpl(const char *pathname, struct statfs *st);
-static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx);
-
-/* ================= Step 6: stdio + open2 ================= */
-static FILE *(*old_fopen)(const char *, const char *);
-static int (*old___open_2)(const char *, int);
-
-static FILE *fopenImpl(const char *pathname, const char *mode);
-static int __open_2Impl(const char *pathname, int flags);
-static int serve_sanitized_proc(const char *pathname);
-
-/* ================= Step 8.5: dlopen hooks -> 新加载 .so 自动刷新 ================= */
-
-static void *(*old_dlopen)(const char *, int);
-static void *(*old_android_dlopen_ext)(const char *, int, const void *);
-
-static void sigb_refresh_after_load(void) {
-    sigb_set_state(SIGB_STATE_REENTRY);
-    /* 同步刷新：新 .so 加载后立即 hook，避免目标 app 紧接着调用检测函数时
-       hook 尚未就绪（异步会引入竞态）。xhook_refresh 内部不调用 dlopen，
-       不会与加载线程持有的 linker 锁形成死锁。 */
-    xhook_refresh(0);
-    sigb_set_state(SIGB_STATE_NORMAL);
+static int accessImpl(const char *pathname, int mode) {
+    if (old_access == NULL) { errno = ENOSYS; return -1; }
+    return old_access(pathname, mode);
 }
 
 static void *dlopenImpl(const char *filename, int flags) {
@@ -242,31 +205,16 @@ static int accessImpl(const char *pathname, int mode) {
 }
 
 static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT readlink %s -> %s", pathname, sigb_get_rep_path());
-        if (old_readlink == NULL) { errno = ENOSYS; return -1; }
-        return old_readlink(sigb_get_rep_path(), buf, bufsiz);
-    }
     if (old_readlink == NULL) { errno = ENOSYS; return -1; }
     return old_readlink(pathname, buf, bufsiz);
 }
 
 static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT readlinkat %s -> %s", pathname, sigb_get_rep_path());
-        if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
-        return old_readlinkat(dirfd, sigb_get_rep_path(), buf, bufsiz);
-    }
     if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
     return old_readlinkat(dirfd, pathname, buf, bufsiz);
 }
 
 static char *realpathImpl(const char *pathname, char *resolved_path) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT realpath %s -> %s", pathname, sigb_get_rep_path());
-        if (old_realpath == NULL) { errno = ENOSYS; return NULL; }
-        return old_realpath(sigb_get_rep_path(), resolved_path);
-    }
     if (old_realpath == NULL) { errno = ENOSYS; return NULL; }
     return old_realpath(pathname, resolved_path);
 }
@@ -284,51 +232,26 @@ static int statImpl(const char *pathname, struct stat *st) {
 }
 
 static int lstatImpl(const char *pathname, struct stat *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT lstat %s -> %s", pathname, sigb_get_rep_path());
-        if (old_lstat == NULL) { errno = ENOSYS; return -1; }
-        return old_lstat(sigb_get_rep_path(), st);
-    }
     if (old_lstat == NULL) { errno = ENOSYS; return -1; }
     return old_lstat(pathname, st);
 }
 
 static int stat64Impl(const char *pathname, struct stat64 *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT stat64 %s -> %s", pathname, sigb_get_rep_path());
-        if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
-        return old_stat64(sigb_get_rep_path(), st);
-    }
     if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
     return old_stat64(pathname, st);
 }
 
 static int lstat64Impl(const char *pathname, struct stat64 *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT lstat64 %s -> %s", pathname, sigb_get_rep_path());
-        if (old_lstat64 == NULL) { errno = ENOSYS; return -1; }
-        return old_lstat64(sigb_get_rep_path(), st);
-    }
     if (old_lstat64 == NULL) { errno = ENOSYS; return -1; }
     return old_lstat64(pathname, st);
 }
 
 static int statfsImpl(const char *pathname, struct statfs *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT statfs %s -> %s", pathname, sigb_get_rep_path());
-        if (old_statfs == NULL) { errno = ENOSYS; return -1; }
-        return old_statfs(sigb_get_rep_path(), st);
-    }
     if (old_statfs == NULL) { errno = ENOSYS; return -1; }
     return old_statfs(pathname, st);
 }
 
 static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT statx %s -> %s", pathname, sigb_get_rep_path());
-        if (old_statx == NULL) { errno = ENOSYS; return -1; }
-        return old_statx(dirfd, sigb_get_rep_path(), flags, mask, stx);
-    }
     if (old_statx == NULL) { errno = ENOSYS; return -1; }
     return old_statx(dirfd, pathname, flags, mask, stx);
 }

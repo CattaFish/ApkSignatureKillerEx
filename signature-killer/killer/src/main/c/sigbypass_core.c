@@ -214,7 +214,7 @@ int sigb_parse_maps_entry(const char *line, sigb_map_entry_t *entry) {
     return 1;
 }
 
-static int sigb_path_matches_apk(const char *path) {
+static __attribute__((unused)) int sigb_path_matches_apk(const char *path) {
     const char *apk = sigb_get_apk_path();
     if (path == NULL || path[0] == '\0') return 0;
     if (apk != NULL) {
@@ -229,58 +229,11 @@ static int sigb_path_matches_apk(const char *path) {
     return 0;
 }
 
-static int sigb_query_rep_id(char *dev_out, size_t dev_size, unsigned long long *inode_out) {
-    const char *rep = sigb_get_rep_path();
-    if (rep == NULL || dev_out == NULL || inode_out == NULL || dev_size == 0) return 0;
-#if defined(__LP64__)
-    struct stat st;
-#else
-    struct stat64 st;   /* 32 位下 fstatat64 写入 64 位布局 */
-#endif
-    memset(&st, 0, sizeof(st));
-    long rc = syscall(SIGB_CORE_STAT_NR, AT_FDCWD, rep, &st, 0);
-    if (rc != 0) {
-        XH_LOG_ERROR("sigb_query_rep_id: fstatat %s failed errno=%d", rep, errno);
-        return 0;
-    }
-    unsigned int major = (unsigned int)(((unsigned long long)st.st_dev >> 8) & 0xfff);
-    unsigned int minor = (unsigned int)(st.st_dev & 0xff)
-                         | (unsigned int)(((unsigned long long)st.st_dev >> 12) & 0xfff00);
-    snprintf(dev_out, dev_size, "%02x:%02x", major & 0xff, minor & 0xff);
-    *inode_out = (unsigned long long)st.st_ino;
-    return 1;
-}
-
-static int g_rep_id_ready = 0;
-static char g_cached_rep[SIGB_MAP_PATH_MAX] = {0};
-static char g_rep_dev[32] = {0};
-static unsigned long long g_rep_ino = 0;
-
-static int sigb_get_rep_id_cached(char *dev_out, size_t dev_size, unsigned long long *inode_out) {
-    const char *rep = sigb_get_rep_path();
-    if (rep == NULL || dev_out == NULL || inode_out == NULL || dev_size == 0) return 0;
-    pthread_mutex_lock(&g_rep_id_mutex);
-    if (!g_rep_id_ready || strcmp(g_cached_rep, rep) != 0) {
-        if (!sigb_query_rep_id(g_rep_dev, sizeof(g_rep_dev), &g_rep_ino)) {
-            pthread_mutex_unlock(&g_rep_id_mutex);
-            return 0;
-        }
-        size_t rep_len = strlen(rep);
-        if (rep_len >= sizeof(g_cached_rep)) rep_len = sizeof(g_cached_rep) - 1;
-        memcpy(g_cached_rep, rep, rep_len);
-        g_cached_rep[rep_len] = '\0';
-        g_rep_id_ready = 1;
-    }
-    snprintf(dev_out, dev_size, "%s", g_rep_dev);
-    *inode_out = g_rep_ino;
-    pthread_mutex_unlock(&g_rep_id_mutex);
-    return 1;
-}
 
 /* 匿名可执行段改写：path 为空且 perms 含 x 的映射改为 r--p。
    目的：堵住 'rwxp' 敏感词行 - 真正的可执行匿名内存是 JIT 的正常行为，
    但检测方常以 rwxp 作为 hook/注入特征。这里只改 perms，不动 start/end。 */
-static void sigb_neuter_anon_exec(const sigb_map_entry_t *entry, char *perms_out, size_t perms_out_len) {
+static __attribute__((unused)) void sigb_neuter_anon_exec(const sigb_map_entry_t *entry, char *perms_out, size_t perms_out_len) {
     if (entry == NULL || perms_out == NULL || perms_out_len < 5) return;
     if (entry->path[0] != '\0') return;               /* 只处理匿名映射 */
     if (strchr(entry->perms, 'x') == NULL) return;    /* 无执行位不动 */
@@ -288,6 +241,7 @@ static void sigb_neuter_anon_exec(const sigb_map_entry_t *entry, char *perms_out
 }
 
 char *sigb_sanitize_maps(const char *content, int is_smaps) {
+    (void)is_smaps;
     if (content == NULL) return NULL;
     size_t content_len = strlen(content);
     size_t cap = content_len * 2 + 128;
@@ -310,53 +264,9 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
         int keep = 1;
         if (sigb_contains_sensitive_word(line)) {
             keep = 0;
-        } else if (!is_smaps) {
-            sigb_map_entry_t entry;
-            if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {                char dev[32] = {0};
-                unsigned long long ino = 0;
-                const char *shown_path = entry.path;
-                if (sigb_get_rep_id_cached(dev, sizeof(dev), &ino)) {
-                    char rewritten[PATH_MAX + 128];
-                    snprintf(rewritten, sizeof(rewritten),
-                             "%012lx-%012lx %s %08lx %s %llu %s",
-                             entry.start, entry.end, entry.perms,
-                             entry.offset, dev, ino, shown_path);
-                    free(line);
-                    line = dup_str(rewritten);
-                    if (line == NULL) {
-                        free(out);
-                        return NULL;
-                    }                    XH_LOG_WARN("MAP_APK_AFTER: %s", rewritten);
-                    line_len = strlen(line);
-                }
-            }
         }
 
         if (keep) {
-            /* smaps 行多且结构不同（有 Pss/Shared 子字段），行重写容易破坏解析，
-               因此 smaps 只做敏感词整行过滤，不做 perms/inode 改写。 */
-            if (!is_smaps) {
-                sigb_map_entry_t entry;
-                if (sigb_parse_maps_entry(line, &entry)) {
-                    char new_perms[5] = {0};
-                    sigb_neuter_anon_exec(&entry, new_perms, sizeof(new_perms));
-                    if (new_perms[0] != '\0') {
-                        char rewritten[PATH_MAX + 128];
-                        snprintf(rewritten, sizeof(rewritten),
-                                 "%012lx-%012lx %s %08lx %s %llu %s",
-                                 entry.start, entry.end, new_perms,
-                                 entry.offset, entry.dev, entry.inode,
-                                 entry.path);
-                        free(line);
-                        line = dup_str(rewritten);
-                        if (line == NULL) {
-                            free(out);
-                            return NULL;
-                        }
-                        line_len = strlen(line);
-                    }
-                }
-            }
             if (out_pos + line_len + 2 > cap) {
                 size_t new_cap = cap * 2;
                 if (new_cap < out_pos + line_len + 2) new_cap = out_pos + line_len + 2;

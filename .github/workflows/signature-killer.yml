@@ -55,7 +55,10 @@ jobs:
 
       - name: Build killer module
         working-directory: signature-killer
-        run: ./gradlew :killer:assembleRelease --stacktrace
+        run: |
+          ./gradlew :killer:clean --stacktrace
+          rm -rf killer/build
+          ./gradlew :killer:assembleRelease --stacktrace
 
       - name: Prepare killer payload
         working-directory: signature-killer
@@ -82,11 +85,21 @@ jobs:
           mkdir -p work_killer/lib
           cp -r work_killer/jni/* work_killer/lib/
           echo "SO_CHECK_START"
+          so_ok=1
           for so in work_killer/lib/*/libSignedByRS.so; do
             echo "=== $so ==="
-            strings "$so" | grep -F '/data/app/' >/dev/null && echo "SO_HAS_DATA_APP=YES" || echo "SO_HAS_DATA_APP=NO"
+            if strings "$so" | grep -F '/data/app/' >/dev/null; then
+              echo "SO_HAS_DATA_APP=YES"
+            else
+              echo "SO_HAS_DATA_APP=NO"
+              so_ok=0
+            fi
           done
           echo "SO_CHECK_END"
+          if [ "$so_ok" != "1" ]; then
+            echo "FAIL: 检测到旧版/非本次源码编译的 libSignedByRS.so（缺少 /data/app/ marker）"
+            exit 1
+          fi
           ls -l work_killer work_killer/lib/*/
 
       - name: Download input APK

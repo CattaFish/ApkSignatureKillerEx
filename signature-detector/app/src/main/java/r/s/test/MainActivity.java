@@ -125,6 +125,17 @@ public class MainActivity extends Activity {
         append(sb, "From ArchiveInfo: ", strArchiveInfo,
                 sigArchiveInfo != null && signatureExpected.equals(strArchiveInfo) ? Color.BLUE
                         : (sigArchiveInfo == null ? Color.GRAY : Color.RED));
+
+        // ---- 外部直解析 APK Signing Block v2/v3（模拟外部 native 检测） ----
+        byte[] sigV2Block = signatureFromV2Block();
+        String strV2Block = sigV2Block == null ? "N/A" : md5(sigV2Block);
+        append(sb, "From V2Block: ", strV2Block,
+                sigV2Block != null && signatureExpected.equals(strV2Block) ? Color.BLUE : Color.RED);
+
+        byte[] sigV2BlockSvc = signatureFromV2BlockSvc();
+        String strV2BlockSvc = sigV2BlockSvc == null ? "N/A" : md5(sigV2BlockSvc);
+        append(sb, "From V2Block SVC: ", strV2BlockSvc,
+                sigV2BlockSvc != null && signatureExpected.equals(strV2BlockSvc) ? Color.BLUE : Color.RED);
         // ---- end stage 1.5 probes ----
         append(sb, "V2DBG: ", v2LastError == null ? "ok" : v2LastError, Color.GRAY);
 
@@ -216,6 +227,17 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private byte[] signatureFromV2Block() {
+        // 正常读：xhook 生效时 open 会被重定向到 signed.apk（原V2证书），未生效则读到 fake
+        return signatureFromApkSigningBlock();
+    }
+
+    private byte[] signatureFromV2BlockSvc() {
+        // raw syscall 直读磁盘 base.apk：绕过所有用户态 hook，必读 fake V2 证书
+        byte[] apkBytes = readRawApkBytesViaSvc();
+        return signatureFromApkSigningBlockBytes(apkBytes);
     }
 
     // ---- end stage 1.5 probe helpers ----

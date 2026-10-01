@@ -66,3 +66,7 @@
 - 不再复制 assets/SignedByRS/input.apk 副本（运行时已不需要它）；
 - 产物大小 ≈ 原包，而非 2 倍原包；
 - 开启 dedup 后 killer 链降级（见 README 风险清单），追求最强过签时禁用。
+
+## 六、V2Block 外部解析探针（2026-10-01）
+- detector 新增 From V2Block（正常读，验证 xhook 重定向）与 From V2Block SVC（raw syscall 直读 base.apk，模拟外部 native 直解析 APK Signing Block v2/v3）；
+- From V2Block SVC 在 killer 处理后的 APK 上必然红：V2 块内是新证书（免 root 结构性死穴），该探针用于自证方案边界。

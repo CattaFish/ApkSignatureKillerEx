@@ -36,9 +36,10 @@
 
 ### 检测工具（signature-detector）
 
-11 行探针：From API / From APK / From SVC / From SigningInfo /
-hasSigningCertificate / From ArchiveInfo / ch4（native fopen）/
-ch5（stat norm/raw）/ ch7（maps 敏感词+inode）/ ch9（.so 敏感词）/ Expected[auto]
+13 行探针：From API / From APK / From SVC / From SigningInfo /
+hasSigningCertificate / From ArchiveInfo / From V2Block /
+From V2Block SVC / ch4（native fopen）/ ch5（stat norm/raw）/
+ch7（maps 敏感词+inode）/ ch9（.so 敏感词）/ Expected[auto]
 
 killer 处理后 11 行全绿（含 SVC + hasSigningCertificate）。
 

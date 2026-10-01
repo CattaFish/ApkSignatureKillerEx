@@ -136,6 +136,18 @@ public class MainActivity extends Activity {
         String strV2BlockSvc = sigV2BlockSvc == null ? "N/A" : md5(sigV2BlockSvc);
         append(sb, "From V2Block SVC: ", strV2BlockSvc,
                 sigV2BlockSvc != null && signatureExpected.equals(strV2BlockSvc) ? Color.BLUE : Color.RED);
+
+        // ---- stage 2 probes: 绕开 getPackageResourcePath() 的信息来源 ----
+        String realApkPath = extractRealApkPathFromMaps();
+        String pathRes = getPackageResourcePath();
+        boolean pathRedirected = realApkPath != null && !realApkPath.equals(pathRes);
+        String pathLine = "res=" + pathRes + " maps=" + (realApkPath != null ? realApkPath : "?")
+                + (pathRedirected ? " (REDIRECTED)" : " (SAME)");
+        append(sb, "C1 PathDiff: ", pathLine, pathRedirected ? Color.RED : Color.BLUE);
+
+        String crossInfo = probeV1V2Cross(realApkPath);
+        boolean crossSplit = crossInfo.contains("(SPLIT)") || crossInfo.contains("(FAKE)");
+        append(sb, "A1 V1/V2 Cross: ", crossInfo, crossSplit ? Color.RED : Color.BLUE);
         // ---- end stage 1.5 probes ----
         append(sb, "V2DBG: ", v2LastError == null ? "ok" : v2LastError, Color.GRAY);
 
@@ -238,6 +250,73 @@ public class MainActivity extends Activity {
         // raw syscall 直读磁盘 base.apk：绕过所有用户态 hook，必读 fake V2 证书
         byte[] apkBytes = readRawApkBytesViaSvc();
         return signatureFromApkSigningBlockBytes(apkBytes);
+    }
+
+    private String extractRealApkPathFromMaps() {
+        try {
+            String maps = NativeDetector.probeMaps(true);
+            if (maps == null) return null;
+            String pkg = getPackageName();
+            for (String line : maps.split("\n")) {
+                String[] arr = line.split("\\s+");
+                if (arr.length == 0) continue;
+                String path = arr[arr.length - 1];
+                if (!path.startsWith("/") || !path.endsWith(".apk")) continue;
+                if (path.contains(pkg) || (path.contains("/app/") && path.endsWith("base.apk"))) {
+                    return path;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private byte[] readRawApkBytesViaPath(String path) {
+        try (ParcelFileDescriptor fd = ParcelFileDescriptor.adoptFd(openAt(path));
+             FileInputStream fis = new FileInputStream(fd.getFileDescriptor())) {
+            long len = fd.getStatSize();
+            if (len <= 0 || len > 200 * 1024 * 1024) return null;
+            byte[] buf = new byte[(int) len];
+            int off = 0;
+            while (off < buf.length) {
+                int n = fis.read(buf, off, buf.length - off);
+                if (n < 0) break;
+                off += n;
+            }
+            return off == buf.length ? buf : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private byte[] signatureFromApkV1Bytes(byte[] apkBytes) {
+        if (apkBytes == null) return null;
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(apkBytes))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.getName().matches("(META-INF/.*)\\.(RSA|DSA|EC)")) {
+                    CertificateFactory cf = CertificateFactory.getInstance("X509");
+                    X509Certificate cert = (X509Certificate) cf.generateCertificate(zis);
+                    return cert.getEncoded();
+                }
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    private String probeV1V2Cross(String realApkPath) {
+        if (realApkPath == null) return "ERR:no-path";
+        byte[] apkBytes = readRawApkBytesViaPath(realApkPath);
+        if (apkBytes == null) return "ERR:read";
+        byte[] v1 = signatureFromApkV1Bytes(apkBytes);
+        byte[] v2 = signatureFromApkSigningBlockBytes(apkBytes);
+        String v1s = v1 == null ? "null" : md5(v1);
+        String v2s = v2 == null ? "null" : md5(v2);
+        boolean same = v1s.equals(v2s);
+        if (same) return "v1=" + v1s + " v2=" + v2s + " (SAME)";
+        return "v1=" + v1s + " v2=" + v2s + " (SPLIT)";
     }
 
     // ---- end stage 1.5 probe helpers ----

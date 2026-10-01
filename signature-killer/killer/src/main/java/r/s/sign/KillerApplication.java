@@ -436,9 +436,14 @@ public class KillerApplication extends Application {
                 if (o instanceof Context) installPmProxy((Context) o, packageName);
                 if (o instanceof Context) {
                     try {
-                        OriginApkCache.prepare((Context) o);
+                        String rep = OriginApkCache.prepare((Context) o);
+                        if (rep != null) {
+                            sRedirectApkPath = rep;
+                        }
+                        redirectApkPaths((Context) o);
+                        Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + sRedirectApkPath);
                     } catch (Throwable t) {
-                        Log.w(TAG, "onLoaded: OriginApkCache.prepare failed", t);
+                        Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                     }
                 }
             } catch (Throwable ignored) {}
@@ -549,7 +554,12 @@ public class KillerApplication extends Application {
 
     private static void redirectApkPaths(Context ctx) {
         try {
-            File repFile = new File(ctx.getDataDir(), "signed.apk");
+            File repFile;
+            if (sRedirectApkPath != null && new File(sRedirectApkPath).isFile()) {
+                repFile = new File(sRedirectApkPath);
+            } else {
+                repFile = new File(ctx.getDataDir(), "signed.apk");
+            }
             if (!repFile.isFile() || repFile.length() <= 0) return;
             final String target = repFile.getAbsolutePath();
 

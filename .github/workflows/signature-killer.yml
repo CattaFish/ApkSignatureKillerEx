@@ -13,6 +13,11 @@ on:
         description: '输入 APK 直链 URL（仅 workflow_dispatch 使用；push 触发时自动跳过处理）'
         required: false
         type: string
+      mode:
+        description: '处理模式: apktool(默认) 或 dexonly(资源混淆大包如QQ)'
+        required: false
+        default: 'apktool'
+        type: string
 
 jobs:
   process:
@@ -84,7 +89,14 @@ jobs:
         working-directory: signature-killer
         env:
           APKTOOL_JAR: "${{ env.APKTOOL_JAR }}"
-        run: python3 process_apk.py --apk input.apk
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "dexonly" ]; then
+            python3 process_dex_only.py --apk input.apk \
+              --apktool "$APKTOOL_JAR" --baksmali ../baksmali.jar \
+              --output work_out/processed_$(date +%Y%m%d_%H%M%S).apk
+          else
+            python3 process_apk.py --apk input.apk
+          fi
 
       - name: Upload processed APK
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.apk_url != ''

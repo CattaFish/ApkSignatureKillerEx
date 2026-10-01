@@ -544,11 +544,11 @@ def main():
     aligned = os.path.join(WORK, "aligned.apk")
     processed = os.path.join(WORK, f"processed_{ts}.apk")
     run([zipalign, "-f", "4", os.path.join(WORK, "unsigned.apk"), aligned])
-    _k, _c, _p = ensure_v2_key()
-    run(["python3", "v2_sign.py",
-         "--input", aligned, "--output", processed,
-         "--key", _k, "--cert", _c, "--pub", _p])
-    print("[ok] V2 签名完成（V1 文件保留为无效壳）")
+    run(["python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "finalize_sign.py"),
+         "--input", os.path.join(WORK, "unsigned.apk"),
+         "--output", processed,
+         "--orig", apk_path])
+    print("[ok] 签名完成")
 
     print("预期: From API/APK 蓝, From SVC 红, ch4 蓝, ch5/ch7/ch9 HOOKED/FILTERED")
 

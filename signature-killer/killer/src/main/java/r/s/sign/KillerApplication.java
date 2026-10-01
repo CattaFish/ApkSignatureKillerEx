@@ -97,12 +97,8 @@ public class KillerApplication extends Application {
                     Log.e(TAG, "init: killPM threw", t);
                 }
             }
-            try {
-                redirectApkPaths(context);
-                Log.w(TAG, "init: redirectApkPaths done");
-            } catch (Throwable t) {
-                Log.e(TAG, "init: redirectApkPaths threw", t);
-            }
+            // 移除路径改写：V2Block SVC/A1 的绿来自 finalize 的 V2 prepend，
+            // 路径改写反而破坏 ch7 的 stat hook 判定（检测器不做任何妥协）
             try {
                 killOpen(packageName);
                 Log.w(TAG, "init: killOpen done");
@@ -458,8 +454,6 @@ public class KillerApplication extends Application {
                     } else {
                         Log.w(TAG, "onLoaded: prepare returned null (assets/SignedByRS/input.apk 缺失?)");
                     }
-                    redirectApkPaths(appCtx);
-                    Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + sRedirectApkPath);
                 } catch (Throwable t) {
                     Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                 }

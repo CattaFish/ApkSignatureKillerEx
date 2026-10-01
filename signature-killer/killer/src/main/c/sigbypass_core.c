@@ -312,14 +312,9 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
             keep = 0;
         } else if (!is_smaps) {
             sigb_map_entry_t entry;
-            if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {
-                XH_LOG_WARN("MAP_APK_LINE: %s", line);
-                char dev[32] = {0};
+            if (sigb_parse_maps_entry(line, &entry) && sigb_path_matches_apk(entry.path)) {                char dev[32] = {0};
                 unsigned long long ino = 0;
-                const char *shown_path = sigb_get_rep_path();
-                if (shown_path == NULL) {
-                    shown_path = entry.path;
-                }
+                const char *shown_path = entry.path;
                 if (sigb_get_rep_id_cached(dev, sizeof(dev), &ino)) {
                     char rewritten[PATH_MAX + 128];
                     snprintf(rewritten, sizeof(rewritten),
@@ -331,9 +326,7 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
                     if (line == NULL) {
                         free(out);
                         return NULL;
-                    }
-                    XH_LOG_WARN("MAP_APK_REWRITE: %s -> %s", entry.path, shown_path);
-                    XH_LOG_WARN("MAP_APK_AFTER: %s", rewritten);
+                    }                    XH_LOG_WARN("MAP_APK_AFTER: %s", rewritten);
                     line_len = strlen(line);
                 }
             }

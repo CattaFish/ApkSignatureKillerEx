@@ -54,3 +54,14 @@
 - onLoaded 直接读 base.apk 的 META-INF/CERT.RSA，不解包 signed.apk（避免大包启动卡死）；
 - finalize_sign 注入原版 V1 三件套 + V2 有效签名；
 - 产物可安装（安装后是否通过 QQ 隐蔽检测需实机观察）。
+
+## 四、QQ dexonly 构建成功（2026-10-01）
+- QQ 9.3.70（41 dex / ~394MB）dexonly 模式成功构建；
+- onLoaded 轻量版直接读 base.apk 的 META-INF/CERT.RSA（不解包 signed.apk）；
+- finalize_sign 注入原版 V1 三件套 + V2 有效签名；
+- 产物可安装（QQ 检测隐蔽，是否完全通过需实机观测）。
+
+## 五、数据复用优化（dedup）
+- workflow 提供 dedup 选项（默认 true）；
+- 不再复制 assets/SignedByRS/input.apk 副本（运行时已不需要它）；
+- 产物大小 ≈ 原包，而非 2 倍原包。

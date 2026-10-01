@@ -74,3 +74,8 @@ push 触发时只构建并上传 `killer-aar`；`workflow_dispatch` 时执行完
 - 重打包时追加 killer dex；
 - finalize_sign 把原版 META-INF/CERT.RSA/SF/MF 注入 + V2 有效签名；
 - 适合 QQ/微信类资源混淆大包。
+
+## 数据复用优化（dedup）
+- workflow 的「数据复用优化」默认勾选；
+- 跳过 `assets/SignedByRS/input.apk` 副本 → 产物与原始 APK 相当；
+- 运行时直接读 base.apk 的 `META-INF/CERT.RSA`（finalize_sign 已注入原证书）。

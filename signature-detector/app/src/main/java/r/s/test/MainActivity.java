@@ -145,6 +145,7 @@ public class MainActivity extends Activity {
                 + (pathRedirected ? " (REDIRECTED)" : " (SAME)");
         append(sb, "C1 PathDiff: ", pathLine, pathRedirected ? Color.RED : Color.BLUE);
 
+        String realApkPath = extractRealApkPathFromMaps();
         String crossInfo = probeV1V2Cross(realApkPath);
         boolean crossSplit = crossInfo.contains("(SPLIT)") || crossInfo.contains("(FAKE)");
         append(sb, "A1 V1/V2 Cross: ", crossInfo, crossSplit ? Color.RED : Color.BLUE);

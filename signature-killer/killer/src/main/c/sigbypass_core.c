@@ -199,6 +199,30 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
             keep = 0;
         }
         if (keep) {
+            /* method A：将 /data 下真实 base.apk 映射路径重写为 signed.apk，
+               inode/dev 保持原样 —— C1 字符串一致，ch7 norm/raw 维度仍一致 */
+            const char *rep = sigb_get_rep_path();
+            if (rep != NULL && line_len > 1) {
+                char *last_space = strrchr(line, ' ');
+                if (last_space != NULL) {
+                    char *path = last_space + 1;
+                    size_t path_len = strlen(path);
+                    if (path_len >= 5 && strncmp(path, "/data/", 6) == 0
+                            && strstr(path, ".apk") != NULL) {
+                        size_t prefix_len = (size_t)(last_space - line);
+                        size_t new_len = prefix_len + 1 + strlen(rep);
+                        char *rewritten = (char *)malloc(new_len + 1);
+                        if (rewritten != NULL) {
+                            memcpy(rewritten, line, prefix_len);
+                            rewritten[prefix_len] = ' ';
+                            strcpy(rewritten + prefix_len + 1, rep);
+                            free(line);
+                            line = rewritten;
+                            line_len = new_len;
+                        }
+                    }
+                }
+            }
             if (out_pos + line_len + 2 > cap) {
                 size_t new_cap = cap * 2;
                 if (new_cap < out_pos + line_len + 2) new_cap = out_pos + line_len + 2;

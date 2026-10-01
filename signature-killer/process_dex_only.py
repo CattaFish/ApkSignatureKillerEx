@@ -78,7 +78,7 @@ def patch_clinit(smali_path):
     return True
 
 
-def find_and_patch(apk_dir, dex_files, rel_path, baksmali):
+def find_and_patch(apk_dir, dex_files, rel_path, baksmali, smali):
     for dex in dex_files:
         out_smali = os.path.join(DEX_WORK, "smali_" + os.path.basename(dex))
         run(["java", "-jar", baksmali, "d", os.path.join(apk_dir, dex), "-o", out_smali])
@@ -90,7 +90,7 @@ def find_and_patch(apk_dir, dex_files, rel_path, baksmali):
         print(f"[ok] 在 {dex} 找到 {rel_path}")
         patch_clinit(target)
         out_dex = os.path.join(DEX_WORK, "patched_" + dex)
-        run(["java", "-jar", baksmali, "b", out_smali, "-o", out_dex])
+        run(["java", "-jar", smali, "a", out_smali, "-o", out_dex])
         shutil.copy2(out_dex, os.path.join(apk_dir, dex))
         print(f"[ok] 已替换 {dex}")
         shutil.rmtree(out_smali, ignore_errors=True)
@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--apk", required=True)
     ap.add_argument("--apktool", required=True)
     ap.add_argument("--baksmali", required=True)
+    ap.add_argument("--smali", required=True)
     ap.add_argument("--output", required=True)
     a = ap.parse_args()
 
@@ -117,7 +118,7 @@ def main():
 
     dex_files = sorted([n for n in os.listdir(unz) if re.fullmatch(r"classes\d*\.dex", n)])
     print("[info] dex files:", len(dex_files))
-    if not find_and_patch(unz, dex_files, rel, a.baksmali):
+    if not find_and_patch(unz, dex_files, rel, a.baksmali, a.smali):
         print("FAIL: 未在任何 dex 找到 Activity")
         sys.exit(1)
 

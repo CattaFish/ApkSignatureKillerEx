@@ -43,9 +43,10 @@ jobs:
           wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O apktool.jar
           echo "APKTOOL_JAR=$PWD/apktool.jar" >> "$GITHUB_ENV"
 
-      - name: Set up baksmali
+      - name: Set up baksmali + smali
         run: |
           wget -q https://github.com/baksmali/smali/releases/download/3.0.10/baksmali-3.0.10-fat.jar -O baksmali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/3.0.10/smali-3.0.10-fat.jar -O smali.jar
 
       - name: Build killer module
         working-directory: signature-killer
@@ -93,6 +94,7 @@ jobs:
           if [ "${{ github.event.inputs.mode }}" = "dexonly" ]; then
             python3 process_dex_only.py --apk input.apk \
               --apktool "$APKTOOL_JAR" --baksmali ../baksmali.jar \
+              --smali ../smali.jar \
               --output work_out/processed_$(date +%Y%m%d_%H%M%S).apk
           else
             python3 process_apk.py --apk input.apk

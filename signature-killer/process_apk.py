@@ -29,6 +29,18 @@ ABIS = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def run(cmd):
     print("+", " ".join(cmd), flush=True)
     r = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        log_path = os.path.join(WORK, "pipeline.log")
+        if os.environ.get("WORK") or True:
+            os.makedirs(WORK, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as lf:
+                lf.write("+ " + " ".join(cmd) + "\n")
+                lf.write(r.stdout[-4000:])
+                lf.write("\n")
+                lf.write(r.stderr[-4000:])
+                lf.write("\n")
+    except Exception as e:
+        print(f"[warn] 日志写入失败: {e}")
     if r.returncode != 0:
         print(r.stdout[-3000:])
         print(r.stderr[-3000:])

@@ -100,10 +100,10 @@ jobs:
         with:
           name: pipeline-debug
           path: |
-            signature-killer/work_out/decoded
-            signature-killer/work_out/*.apk
-            signature-killer/*.apk
+            signature-killer/work_out/pipeline.log
+            signature-killer/work_out/decoded/AndroidManifest.xml
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload killer AAR
         if: always()

@@ -1,0 +1,6 @@
+BASELINE: A1 GREEN(SAME), C1 RED(base.apk 路径), ch7 CHECK(raw ino=-1)
+MODIFIED: sigbypass 路径泛化+shown_path 重写; killOpen 统一 rep=/data/user/0/.../signed.apk;
+          ch7 按包名匹配
+  验证: grep 命中 3 处; C/Java/Detector brace/paren 全 0
+ROLLBACK: bash .task_artifacts/c1_fix_round2/ROLLBACK.sh
+DIFF:     .task_artifacts/c1_fix_round2/DIFF.txt

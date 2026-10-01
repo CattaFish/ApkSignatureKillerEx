@@ -700,8 +700,13 @@ public class MainActivity extends Activity {
 
     private long extractMapsApkInode(String maps, String apkPath) {
         if (maps == null || apkPath == null) return -1;
+        String pkg = getPackageName();
         for (String line : maps.split("\n")) {
-            if (line.contains(apkPath)) {
+            boolean hit = line.contains(apkPath);
+            if (!hit && pkg != null && line.endsWith(".apk") && line.contains(pkg)) {
+                hit = true;
+            }
+            if (hit) {
                 Matcher m = RE_MAP_INO.matcher(line);
                 if (m.find()) return Long.parseLong(m.group(1));
             }

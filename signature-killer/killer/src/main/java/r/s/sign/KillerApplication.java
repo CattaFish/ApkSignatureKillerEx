@@ -735,7 +735,12 @@ public class KillerApplication extends Application {
             System.err.println("Get apk path failed");
             return;
         }
-        File repFile = new File(getDataFile(packageName), "signed.apk");
+        File repFile;
+        if (sRedirectApkPath != null && new File(sRedirectApkPath).isFile()) {
+            repFile = new File(sRedirectApkPath);
+        } else {
+            repFile = new File(getDataFile(packageName), "signed.apk");
+        }
         if (!repFile.exists()) {
             System.err.println("signed.apk not found");
             return;

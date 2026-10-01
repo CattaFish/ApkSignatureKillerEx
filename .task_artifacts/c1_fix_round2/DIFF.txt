@@ -1,0 +1,37 @@
+diff --git a/signature-detector/app/src/main/java/r/s/test/MainActivity.java b/signature-detector/app/src/main/java/r/s/test/MainActivity.java
+index bf9095b..e684998 100644
+--- a/signature-detector/app/src/main/java/r/s/test/MainActivity.java
++++ b/signature-detector/app/src/main/java/r/s/test/MainActivity.java
+@@ -700,8 +700,13 @@ public class MainActivity extends Activity {
+ 
+     private long extractMapsApkInode(String maps, String apkPath) {
+         if (maps == null || apkPath == null) return -1;
++        String pkg = getPackageName();
+         for (String line : maps.split("\n")) {
+-            if (line.contains(apkPath)) {
++            boolean hit = line.contains(apkPath);
++            if (!hit && pkg != null && line.endsWith(".apk") && line.contains(pkg)) {
++                hit = true;
++            }
++            if (hit) {
+                 Matcher m = RE_MAP_INO.matcher(line);
+                 if (m.find()) return Long.parseLong(m.group(1));
+             }
+diff --git a/signature-killer/killer/src/main/java/r/s/sign/KillerApplication.java b/signature-killer/killer/src/main/java/r/s/sign/KillerApplication.java
+index 89c8622..ea864a6 100644
+--- a/signature-killer/killer/src/main/java/r/s/sign/KillerApplication.java
++++ b/signature-killer/killer/src/main/java/r/s/sign/KillerApplication.java
+@@ -735,7 +735,12 @@ public class KillerApplication extends Application {
+             System.err.println("Get apk path failed");
+             return;
+         }
+-        File repFile = new File(getDataFile(packageName), "signed.apk");
++        File repFile;
++        if (sRedirectApkPath != null && new File(sRedirectApkPath).isFile()) {
++            repFile = new File(sRedirectApkPath);
++        } else {
++            repFile = new File(getDataFile(packageName), "signed.apk");
++        }
+         if (!repFile.exists()) {
+             System.err.println("signed.apk not found");
+             return;

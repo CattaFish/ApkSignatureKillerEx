@@ -492,6 +492,47 @@ def main():
 
     run(["java", "-jar", args.apktool, "b", DECODED, "-o", os.path.join(WORK, "unsigned.apk")])
 
+    # raw 模式下 apktool b 会把文本 manifest 直接复制；用 aapt 单独编译为 AXML 替换
+    _zipalign_dir = os.path.dirname(zipalign) if 'zipalign' in dir() else None
+    _aapt = None
+    _android_jar = None
+    _platforms = os.path.join(os.environ.get("ANDROID_HOME", ""), "platforms")
+    if os.path.isdir(_platforms):
+        for _p in sorted(os.listdir(_platforms), reverse=True):
+            _cand = os.path.join(_platforms, _p, "android.jar")
+            if os.path.isfile(_cand):
+                _android_jar = _cand
+                break
+    if _android_jar:
+        import glob as _glob
+        _aapts = _glob.glob(os.path.join(os.environ.get("ANDROID_HOME", ""),
+                                         "build-tools", "*", "aapt"))
+        if _aapts:
+            _aapt = sorted(_aapts)[-1]
+    if _aapt and _android_jar:
+        _mf_apk = os.path.join(WORK, "manifest_build.apk")
+        run([_aapt, "package", "-f",
+             "-M", os.path.join(DECODED, "AndroidManifest.xml"),
+             "-I", _android_jar,
+             "-F", _mf_apk])
+        import zipfile as _zi2
+        with _zi2.ZipFile(_mf_apk) as _zr:
+            _compiled_mf = _zr.read("AndroidManifest.xml")
+        _unsigned = os.path.join(WORK, "unsigned.apk")
+        _tmpu = _unsigned + ".tmp"
+        with _zi2.ZipFile(_unsigned, "r") as _zin, _zi2.ZipFile(_tmpu, "w") as _zout:
+            for _it in _zin.infolist():
+                if _it.filename == "AndroidManifest.xml":
+                    _zi = _zi2.ZipInfo("AndroidManifest.xml")
+                    _zi.external_attr = _it.external_attr
+                    _zout.writestr(_zi, _compiled_mf)
+                else:
+                    _zout.writestr(_it, _zin.read(_it.filename))
+        os.replace(_tmpu, _unsigned)
+        print("[ok] AndroidManifest.xml 已编译为 AXML 并替换")
+    else:
+        print("[warn] 未找到 aapt/android.jar，manifest 保持文本（apksig 将失败）")
+
     # 追加 killer dex（d8 产物，不反编译原 dex）：作为新 classesN.dex
     import zipfile as _zi
     _killer_dex = os.path.join(KILLER_SMALI, "..", "classes.dex")

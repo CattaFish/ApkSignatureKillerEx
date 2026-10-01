@@ -108,8 +108,6 @@ def main():
 
     prepend_original_v2_pair(a.output, a.orig)
 
-if __name__ == "__main__":
-    main()
 
 
 def find_eocd(data):
@@ -157,9 +155,7 @@ def extract_first_v2_pair(apk_path):
 
 
 def prepend_original_v2_pair(signed_apk, orig_apk):
-    """把原 APK 的原始 v2/v3 signer block 前置到产物 signing block 最前面。
-    检测方若只提取证书不做验签（A1/V2Block SVC），会先读到原证书 → 绿；
-    系统安装仍验证后续 fake signer（匹配新内容 digest）→ 免 root 安装成立。"""
+    """把原 APK 的原始 v2/v3 signer block 前置到产物 signing block 最前面。"""
     orig_pair = extract_first_v2_pair(orig_apk)
     if orig_pair is None:
         print("[warn] orig has no v2/v3 block, skip prepend")
@@ -198,4 +194,8 @@ def prepend_original_v2_pair(signed_apk, orig_apk):
     with open(signed_apk, "wb") as f:
         f.write(out)
     print("[ok] prepended original v2 signer block to signing block")
+
+
+if __name__ == "__main__":
+    main()
 

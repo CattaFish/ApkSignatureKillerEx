@@ -26,14 +26,10 @@ static ssize_t (*old_readlink)(const char *, char *, size_t);
 static ssize_t (*old_readlinkat)(int, const char *, char *, size_t);
 static char *(*old_realpath)(const char *, char *);
 
-static int accessImpl(const char *pathname, int mode) {
-    if (old_access == NULL) { errno = ENOSYS; return -1; }
-    return old_access(pathname, mode);
-}
-static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
-    if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
-    return old_readlinkat(dirfd, pathname, buf, bufsiz);
-}
+static int accessImpl(const char *pathname, int mode);
+static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz);
+static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz);
+static char *realpathImpl(const char *pathname, char *resolved_path);
 
 /* ================= Step 5: stat family ================= */
 static int (*old_stat)(const char *, struct stat *);
@@ -43,18 +39,12 @@ static int (*old_lstat64)(const char *, struct stat64 *);
 static int (*old_statfs)(const char *, struct statfs *);
 static int (*old_statx)(int, const char *, int, unsigned int, struct statx *);
 
-static int statImpl(const char *pathname, struct stat *st) {
-    if (old_stat == NULL) { errno = ENOSYS; return -1; }
-    return old_stat(pathname, st);
-}
-static int stat64Impl(const char *pathname, struct stat64 *st) {
-    if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
-    return old_stat64(pathname, st);
-}
-static int statfsImpl(const char *pathname, struct statfs *st) {
-    if (old_statfs == NULL) { errno = ENOSYS; return -1; }
-    return old_statfs(pathname, st);
-}
+static int statImpl(const char *pathname, struct stat *st);
+static int lstatImpl(const char *pathname, struct stat *st);
+static int stat64Impl(const char *pathname, struct stat64 *st);
+static int lstat64Impl(const char *pathname, struct stat64 *st);
+static int statfsImpl(const char *pathname, struct statfs *st);
+static int statxImpl(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *stx);
 
 /* ================= Step 6: stdio + open2 ================= */
 static FILE *(*old_fopen)(const char *, const char *);
@@ -65,15 +55,11 @@ static int __open_2Impl(const char *pathname, int flags);
 static int serve_sanitized_proc(const char *pathname);
 
 /* ================= Step 8.5: dlopen hooks -> 新加载 .so 自动刷新 ================= */
-
 static void *(*old_dlopen)(const char *, int);
 static void *(*old_android_dlopen_ext)(const char *, int, const void *);
 
 static void sigb_refresh_after_load(void) {
     sigb_set_state(SIGB_STATE_REENTRY);
-    /* 同步刷新：新 .so 加载后立即 hook，避免目标 app 紧接着调用检测函数时
-       hook 尚未就绪（异步会引入竞态）。xhook_refresh 内部不调用 dlopen，
-       不会与加载线程持有的 linker 锁形成死锁。 */
     xhook_refresh(0);
     sigb_set_state(SIGB_STATE_NORMAL);
 }
@@ -86,7 +72,6 @@ static void *dlopenImpl(const char *filename, int flags) {
     return h;
 }
 
-/* android_dlopen_ext 是 Bionic 扩展，NDK 头文件不声明，用 dlsym 运行时解析 */
 static void *android_dlopen_extImpl(const char *filename, int flags, const void *extinfo) {
     static void *(*real_android_dlopen_ext)(const char *, int, const void *) = NULL;
     if (real_android_dlopen_ext == NULL) {
@@ -118,14 +103,12 @@ struct DlIterateCtx {
 static int sanitizedDlCallback(struct dl_phdr_info *info, size_t size, void *data);
 static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void *), void *data);
 
-
 int (*old_open)(const char *, int, mode_t);
 static int openImpl(const char *pathname, int flags, mode_t mode) {
     if (!sigb_maybe_relevant(pathname)) {
         if (old_open == NULL) { errno = ENOSYS; return -1; }
         return old_open(pathname, flags, mode);
     }
-
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -136,7 +119,7 @@ static int openImpl(const char *pathname, int flags, mode_t mode) {
         XH_LOG_WARN("REDIRECT open %s -> %s", pathname, sigb_get_rep_path());
         return old_open(sigb_get_rep_path(), flags, mode);
     }
-        return old_open(pathname, flags, mode);
+    return old_open(pathname, flags, mode);
 }
 
 int (*old_open64)(const char *, int, mode_t);
@@ -145,7 +128,6 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
         if (old_open64 == NULL) { errno = ENOSYS; return -1; }
         return old_open64(pathname, flags, mode);
     }
-
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -156,7 +138,7 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
         XH_LOG_WARN("REDIRECT open64 %s -> %s", pathname, sigb_get_rep_path());
         return old_open64(sigb_get_rep_path(), flags, mode);
     }
-        return old_open64(pathname, flags, mode);
+    return old_open64(pathname, flags, mode);
 }
 
 int (*old_openat)(int, const char*, int, mode_t);
@@ -165,7 +147,6 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
         if (old_openat == NULL) { errno = ENOSYS; return -1; }
         return old_openat(fd, pathname, flags, mode);
     }
-
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -176,7 +157,7 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
         XH_LOG_WARN("REDIRECT openat %s -> %s", pathname, sigb_get_rep_path());
         return old_openat(fd, sigb_get_rep_path(), flags, mode);
     }
-        return old_openat(fd, pathname, flags, mode);
+    return old_openat(fd, pathname, flags, mode);
 }
 
 int (*old_openat64)(int, const char*, int, mode_t);
@@ -185,7 +166,6 @@ static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
         if (old_openat64 == NULL) { errno = ENOSYS; return -1; }
         return old_openat64(fd, pathname, flags, mode);
     }
-
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -196,7 +176,7 @@ static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
         XH_LOG_WARN("REDIRECT openat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_openat64(fd, sigb_get_rep_path(), flags, mode);
     }
-        return old_openat64(fd, pathname, flags, mode);
+    return old_openat64(fd, pathname, flags, mode);
 }
 
 JNIEXPORT void JNICALL
@@ -205,6 +185,7 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     const char *rep_path = (*env)->GetStringUTFChars(env, repPath, 0);
     sigb_set_target_paths(apk_path, rep_path);
     XH_LOG_WARN("SIGB_BUILD_MARKER=%s", sigb_build_marker());
+    XH_LOG_WARN("SIGB_REP=%s", rep_path);
     (*env)->ReleaseStringUTFChars(env, apkPath, apk_path);
     (*env)->ReleaseStringUTFChars(env, repPath, rep_path);
 
@@ -234,19 +215,9 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     sigb_set_state(SIGB_STATE_NORMAL);
 }
 
-
-/* ================= Step 4: path family implementations ================= */
+/* ================= Step 4: path family implementations (透传) ================= */
 
 static int accessImpl(const char *pathname, int mode) {
-    if (pathname != NULL && strcmp(pathname, "/dev/fuse") == 0) {
-        errno = ENOENT;
-        return -1;
-    }
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT access %s -> %s", pathname, sigb_get_rep_path());
-        if (old_access == NULL) { errno = ENOSYS; return -1; }
-        return old_access(sigb_get_rep_path(), mode);
-    }
     if (old_access == NULL) { errno = ENOSYS; return -1; }
     return old_access(pathname, mode);
 }
@@ -257,11 +228,6 @@ static ssize_t readlinkImpl(const char *pathname, char *buf, size_t bufsiz) {
 }
 
 static ssize_t readlinkatImpl(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT readlinkat %s -> %s", pathname, sigb_get_rep_path());
-        if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
-        return old_readlinkat(dirfd, sigb_get_rep_path(), buf, bufsiz);
-    }
     if (old_readlinkat == NULL) { errno = ENOSYS; return -1; }
     return old_readlinkat(dirfd, pathname, buf, bufsiz);
 }
@@ -271,14 +237,9 @@ static char *realpathImpl(const char *pathname, char *resolved_path) {
     return old_realpath(pathname, resolved_path);
 }
 
-/* ================= Step 5: stat family implementations ================= */
+/* ================= Step 5: stat family implementations (透传) ================= */
 
 static int statImpl(const char *pathname, struct stat *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT stat %s -> %s", pathname, sigb_get_rep_path());
-        if (old_stat == NULL) { errno = ENOSYS; return -1; }
-        return old_stat(sigb_get_rep_path(), st);
-    }
     if (old_stat == NULL) { errno = ENOSYS; return -1; }
     return old_stat(pathname, st);
 }
@@ -289,11 +250,6 @@ static int lstatImpl(const char *pathname, struct stat *st) {
 }
 
 static int stat64Impl(const char *pathname, struct stat64 *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT stat64 %s -> %s", pathname, sigb_get_rep_path());
-        if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
-        return old_stat64(sigb_get_rep_path(), st);
-    }
     if (old_stat64 == NULL) { errno = ENOSYS; return -1; }
     return old_stat64(pathname, st);
 }
@@ -304,11 +260,6 @@ static int lstat64Impl(const char *pathname, struct stat64 *st) {
 }
 
 static int statfsImpl(const char *pathname, struct statfs *st) {
-    if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT statfs %s -> %s", pathname, sigb_get_rep_path());
-        if (old_statfs == NULL) { errno = ENOSYS; return -1; }
-        return old_statfs(sigb_get_rep_path(), st);
-    }
     if (old_statfs == NULL) { errno = ENOSYS; return -1; }
     return old_statfs(pathname, st);
 }
@@ -325,7 +276,6 @@ static FILE *fopenImpl(const char *pathname, const char *mode) {
         if (old_fopen == NULL) { errno = ENOSYS; return NULL; }
         return old_fopen(pathname, mode);
     }
-
     if (mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -353,7 +303,6 @@ static int __open_2Impl(const char *pathname, int flags) {
         if (old___open_2 == NULL) { errno = ENOSYS; return -1; }
         return old___open_2(pathname, flags);
     }
-
     if ((flags & O_ACCMODE) == O_RDONLY) {
         int sanitized_fd = serve_sanitized_proc(pathname);
         if (sanitized_fd >= 0) {
@@ -367,7 +316,6 @@ static int __open_2Impl(const char *pathname, int flags) {
     if (old___open_2 == NULL) { errno = ENOSYS; return -1; }
     return old___open_2(pathname, flags);
 }
-
 
 /* ================= Step 7: sanitized proc view ================= */
 
@@ -422,7 +370,6 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
     return old_dl_iterate_phdr(sanitizedDlCallback, &ctx);
 }
 
-
 /* ================= Step 9: probe JNI methods ================= */
 
 static char probe_fd_out[8192];
@@ -433,8 +380,6 @@ static char probe_dl_out[16384];
 #else
 #define SIGB_NR_STAT __NR_fstatat64
 #endif
-
-
 
 static int probe_dlcallback(struct dl_phdr_info *info, size_t size, void *data) {
     (void)size;
@@ -485,6 +430,7 @@ Java_r_s_sign_KillerApplication_probeFopen(JNIEnv *env, jclass clazz, jstring jp
     free(buf);
     return out;
 }
+
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
@@ -494,7 +440,6 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
 
     char out[1024];
 
-    /* normal view: libc stat()，会被 statImpl GOT hook 重定向到 signed.apk */
     struct stat st;
     memset(&st, 0, sizeof(st));
     if (stat(path, &st) == 0) {
@@ -504,11 +449,10 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
         snprintf(out, sizeof(out), "normal: ERR errno=%d", errno);
     }
 
-    /* raw view: 原始 syscall 绕过 hook，拿到真实 base.apk 的 stat */
 #if defined(__LP64__)
     struct stat raw_st;
 #else
-    struct stat64 raw_st;   /* 32 位下 fstatat64 写入 64 位布局 */
+    struct stat64 raw_st;
 #endif
     memset(&raw_st, 0, sizeof(raw_st));
     if (syscall(SIGB_NR_STAT, AT_FDCWD, path, &raw_st, 0) == 0) {
@@ -543,12 +487,12 @@ Java_r_s_sign_KillerApplication_probePaths(JNIEnv *env, jclass clazz, jstring jp
     (*env)->ReleaseStringUTFChars(env, jpath, path);
     return (*env)->NewStringUTF(env, out);
 }
+
 JNIEXPORT jstring JNICALL
 Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean raw) {
     (void)clazz;
     const char *path = "/proc/self/maps";
     char *content = NULL;
-
     if (raw == JNI_TRUE) {
         sigb_set_state(SIGB_STATE_PROBE);
         int fd = sigb_raw_open(path);
@@ -564,7 +508,6 @@ Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean ra
             syscall(__NR_close, fd);
         }
     }
-
     if (content == NULL) return (*env)->NewStringUTF(env, "ERR:read");
     jstring out = (*env)->NewStringUTF(env, content);
     free(content);

@@ -22,6 +22,12 @@ push 触发时只构建并上传 `killer-aar`，不处理 APK；`workflow_dispat
 - pipeline 会把输入 APK 的签名 MD5 写入 `MainActivity.smali` 的 `signatureExpected`，
   保证红蓝判断与输入 APK 动态匹配。
 
+## dedup 警告
+
+workflow 的「数据复用优化」默认关闭。开启后 `assets/SignedByRS/input.apk` 会被移除，
+`KillerApplication.init()` 依赖它解包出 `signed.apk`；一旦开启，killOpen（xhook）、
+redirectApkPaths（路径重定向）、killPM、PmProxy 全链失效，开启会新增多处无法过签的场景。
+
 ## 输入要求
 
 - 任何可被 apktool 正常解包的 APK；

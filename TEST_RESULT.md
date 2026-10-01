@@ -61,7 +61,8 @@
 - finalize_sign 注入原版 V1 三件套 + V2 有效签名；
 - 产物可安装（QQ 检测隐蔽，是否完全通过需实机观测）。
 
-## 五、数据复用优化（dedup）
-- workflow 提供 dedup 选项（默认 true）；
+## 五、数据复用优化（dedup，默认关闭）
+- workflow 提供 dedup 选项（默认 false）；
 - 不再复制 assets/SignedByRS/input.apk 副本（运行时已不需要它）；
-- 产物大小 ≈ 原包，而非 2 倍原包。
+- 产物大小 ≈ 原包，而非 2 倍原包；
+- 开启 dedup 后 killer 链降级（见 README 风险清单），追求最强过签时禁用。

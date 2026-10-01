@@ -19,9 +19,9 @@ on:
         default: 'dexonly'
         type: string
       dedup:
-        description: '数据复用优化：删除 assets/SignedByRS/input.apk 副本，产物≈原包大小'
+        description: '数据复用优化（默认关闭）：删除 assets/SignedByRS/input.apk 副本，产物≈原包大小。开启后 killer 能力降级：OriginApkCache.prepare() 取不到 input.apk，init() 全链（killOpen xhook / redirectApkPaths / killPM / PmProxy）提前 return，native 直读、maps 清洗、路径重定向等会新增多处无法过签；追求最强过签请保持关闭'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
 
 jobs:

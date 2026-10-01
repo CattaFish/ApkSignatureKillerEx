@@ -75,7 +75,13 @@ push 触发时只构建并上传 `killer-aar`；`workflow_dispatch` 时执行完
 - finalize_sign 把原版 META-INF/CERT.RSA/SF/MF 注入 + V2 有效签名；
 - 适合 QQ/微信类资源混淆大包。
 
-## 数据复用优化（dedup）
-- workflow 的「数据复用优化」默认勾选；
-- 跳过 `assets/SignedByRS/input.apk` 副本 → 产物与原始 APK 相当；
-- 运行时直接读 base.apk 的 `META-INF/CERT.RSA`（finalize_sign 已注入原证书）。
+## 数据复用优化（dedup，默认关闭）
+
+- workflow 的「数据复用优化」默认**不勾选**，追求最强过签请保持关闭；
+- 开启后会跳过 `assets/SignedByRS/input.apk` 副本，产物与原始 APK 相当，但 killer 能力降级；
+- **开启 dedup 后会新增以下无法过签的场景**：
+  - `init()` 全链失效：`OriginApkCache.prepare()` 因 assets 里没有 input.apk 返回 null，`killOpen`（xhook 路径重定向）、`redirectApkPaths`（LoadedApk 路径改写）、`killPM`（签名替换）、`installPmProxy`（hasSigningCertificate 代理）全部提前 return；
+  - native 直读失效：目标用 raw syscall 读 `/proc/self/maps` + base.apk 路径时，无 xhook 可重定向到 signed.apk，也没有 maps/stat 清洗兜底；
+  - SVC 类检测退化：原始 syscall 读到的内容与正常路径不再一致，stat 无 hook 痕迹可隐藏；
+  - 期望证书来源变弱：只能从 base.apk 的 META-INF 壳读取，壳注入失败时会回落到 v2/v3 block 的 fake 证书，`hasSigningCertificate` 判断颠倒；
+  - 产物体积收益：默认产物 ≈ 2 倍原包（含 input.apk 副本），仅体积敏感时才开 dedup。

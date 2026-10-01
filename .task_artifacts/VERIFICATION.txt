@@ -1,0 +1,7 @@
+BASELINE: cd ~/app/ApkSignatureKillerEx && python3 -m py_compile signature-killer/finalize_sign.py
+  -> exit 0, BASELINE_OK（改动前）
+MODIFIED: python3 -m py_compile signature-killer/finalize_sign.py -> exit 0, MODIFIED_OK
+MODIFIED: 单测脚本 -> PKCS7 parse exit 0; FP orig == FP pkcs7; PASS
+ROLLBACK: cp 修改版到 /tmp/finalize_sign.modified.py; git checkout 还原; py_compile -> ROLLBACK_OK;
+          cp 回修改版; py_compile -> MODIFIED_RESTORED（文件保持已修改）
+DIFF:     ~/app/ApkSignatureKillerEx/.task_artifacts/finalize_sign.diff

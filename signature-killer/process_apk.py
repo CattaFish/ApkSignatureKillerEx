@@ -398,7 +398,7 @@ def main():
     shutil.rmtree(WORK, ignore_errors=True)
     os.makedirs(WORK)
 
-    run(["java", "-jar", args.apktool, "d", "-f", "-s", "-o", DECODED, apk_path])
+    run(["java", "-jar", args.apktool, "d", "-f", "-s", "-r", "-o", DECODED, apk_path])
     print("[ok] apktool d")
 
     manifest_path = os.path.join(DECODED, "AndroidManifest.xml")

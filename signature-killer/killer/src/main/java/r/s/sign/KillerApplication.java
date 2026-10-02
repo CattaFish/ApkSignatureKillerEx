@@ -833,4 +833,8 @@ public class KillerApplication extends Application {
 
     /** 刷新全部已加载 .so 的 hook：目标应用后续 loadLibrary 的检测库需要此入口 */
     public static native void refreshHooks();
+
+    /** 线程级自己人白名单控制 (瞬时开启/关闭) */
+    public static native void setThreadBypass(boolean bypass);
+    public static native boolean isThreadBypass();
 }

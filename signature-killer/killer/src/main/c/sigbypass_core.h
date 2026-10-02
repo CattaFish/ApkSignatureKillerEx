@@ -19,6 +19,10 @@ const char *sigb_get_rep_path(void);
 /* 命中 apkPath 返回 repPath，否则原样返回（NULL 安全） */
 const char *sigb_resolve(const char *path);
 
+/* 线程级自己人白名单控制 (仅供注入模块自身临时开启) */
+void sigb_set_thread_bypass(int bypass);
+int sigb_is_thread_bypass(void);
+
 void sigb_set_state(int state);
 int sigb_get_state(void);
 int sigb_is_normal(void);

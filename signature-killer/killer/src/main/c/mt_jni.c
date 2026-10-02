@@ -546,3 +546,15 @@ Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz, jboole
     }
     return (*env)->NewStringUTF(env, probe_dl_out);
 }
+
+JNIEXPORT void JNICALL
+Java_r_s_sign_KillerApplication_setThreadBypass(JNIEnv *env, jclass clazz, jboolean bypass) {
+    (void)env; (void)clazz;
+    sigb_set_thread_bypass(bypass == JNI_TRUE ? 1 : 0);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_r_s_sign_KillerApplication_isThreadBypass(JNIEnv *env, jclass clazz) {
+    (void)env; (void)clazz;
+    return sigb_is_thread_bypass() ? JNI_TRUE : JNI_FALSE;
+}

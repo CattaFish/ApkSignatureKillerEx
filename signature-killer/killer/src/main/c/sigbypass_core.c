@@ -25,6 +25,15 @@
 static char *g_apk_path = NULL;
 static char *g_rep_path = NULL;
 static atomic_int g_state = SIGB_STATE_NORMAL;
+static __thread int g_thread_bypass = 0;
+
+void sigb_set_thread_bypass(int bypass) {
+    g_thread_bypass = bypass;
+}
+
+int sigb_is_thread_bypass(void) {
+    return g_thread_bypass;
+}
 
 const char *sigb_build_marker(void) {
     return "SIGB_PATH_REWRITE_20261001_829B367";
@@ -60,6 +69,11 @@ const char *sigb_resolve(const char *path) {
     if (path == NULL || g_apk_path == NULL || g_rep_path == NULL) {
         return path;
     }
+    // 【核心自己人白名单】如果当前线程是自己人，直接放行，绝不重定向
+    if (g_thread_bypass) {
+        return path;
+    }
+    // 其余所有情况 (全黑名单)，命中 base.apk 强制重定向至 signed.apk
     if (strcmp(path, g_apk_path) == 0) {
         return g_rep_path;
     }

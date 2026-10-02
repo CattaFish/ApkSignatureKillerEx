@@ -125,6 +125,20 @@ def main():
     if bad:
         print("[hint] 第一个 bad entry 就是根因；把完整输出贴回来。")
         sys.exit(1)
+    # 真实验签：apksigner verify（只验 V2）
+    apksigner_bin = os.popen("command -v apksigner").read().strip()
+    if apksigner_bin:
+        r = subprocess.run(
+            [apksigner_bin, "verify", "--min-sdk-version", "24", v2],
+            capture_output=True, text=True)
+        if r.returncode != 0:
+            print(r.stdout, end="")
+            print(r.stderr, end="")
+            print("[FAIL] apksigner V2 verify failed")
+            sys.exit(1)
+        print("[ok] apksigner V2 verify passed")
+    else:
+        print("[warn] apksigner not found, skip V2 verify")
     print("[ALL OK] 当前代码在你的 input.apk 上本地验证通过")
 
 

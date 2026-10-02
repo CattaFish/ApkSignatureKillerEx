@@ -81,13 +81,13 @@ public final class OriginApkCache {
                 File tmp = new File(dataDir, TARGET_NAME + ".tmp." + android.os.Process.myPid());
                 try (InputStream is = context.getAssets().open(ASSET_PATH);
                      FileOutputStream fos = new FileOutputStream(tmp)) {
-                    byte[] buf = new byte[102400];
+                    byte[] buf = new byte[524288];
                     int len;
                     while ((len = is.read(buf)) > 0) {
                         fos.write(buf, 0, len);
                     }
                     fos.flush();
-                    fos.getFD().sync();
+                    // fos.getFD().sync(); 移除闪存主线程强制同步，彻底消除冷启动卡顿
                 }
 
                 if (!isZipWithManifest(tmp)) {

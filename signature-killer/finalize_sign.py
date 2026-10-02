@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only.
 --multiplex 时：data_multiplexing（MT式复用）-> v2_sign（不重排 V2 重签）-> 逐 entry 自检。
-失败不静默降级，直接报错；调试产物保留 *.debug，workflow 会一并上传。
 """
 import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile, zlib
 
@@ -16,17 +15,6 @@ def run(cmd):
         print(r.stdout[-3000:])
         print(r.stderr[-3000:])
         sys.exit(f"FAIL: {cmd[0]}")
-    return r
-
-def run_visible(cmd):
-    print("+", " ".join(cmd), flush=True)
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.stdout:
-        print(r.stdout, end="", flush=True)
-    if r.stderr:
-        print(r.stderr, end="", flush=True)
-    if r.returncode != 0:
-        sys.exit(f"FAIL: {cmd[0]} (exit {r.returncode})")
     return r
 
 def find_zipalign():
@@ -152,17 +140,62 @@ def _make_eocd(cd_off, cd_size, total):
     struct.pack_into("<I", e, 16, cd_off)
     return bytes(e)
 
+def _extract_cert_from_v2(apk_path):
+    try:
+        with open(apk_path, "rb") as f:
+            data = f.read()
+        if len(data) < 32: return None
+        eocd = _find_eocd(data)
+        if eocd < 0: return None
+        cd_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+        footer_pos = cd_offset - 24
+        if footer_pos < 0 or data[footer_pos+8:footer_pos+24] != b"APK Sig Block 42": return None
+        block_size = struct.unpack_from("<Q", data, footer_pos)[0]
+        off = cd_offset - block_size
+        end = cd_offset - 24
+        while off + 12 <= end:
+            pair_len = struct.unpack_from("<Q", data, off)[0]
+            pair_id = struct.unpack_from("<I", data, off + 8)[0]
+            off += 12
+            if pair_id in (0x7109871a, 0xf05368c0):
+                val = data[off:off + pair_len - 4]
+                s_len = struct.unpack_from("<I", val, 0)[0]
+                signer = val[4:4 + s_len]
+                sd_len = struct.unpack_from("<I", signer, 0)[0]
+                sd = signer[4:4 + sd_len]
+                for i in range(len(sd) - 4):
+                    if sd[i] == 0x30 and sd[i+1] == 0x82:
+                        c_len = (sd[i+2] << 8) | sd[i+3]
+                        if i + 4 + c_len <= len(sd) and c_len > 40:
+                            return sd[i:i + 4 + c_len]
+            off += int(pair_len - 4)
+    except Exception:
+        pass
+    return None
+
 def inject_v1(input_apk, orig_apk):
-    """字节保留式注入原版 V1 三件套：不重新压缩任何 entry，
-    保证 data multiplexing 复用条件（相同文件压缩字节一致）成立。"""
+    """字节保留式注入原版 V1 三件套：自适应匹配 ANDROIDC.RSA 或从 V2 提取证书。"""
     with zipfile.ZipFile(orig_apk) as z:
         trio = {}
         for n in z.namelist():
-            if re.match(r"META-INF/(MANIFEST\.MF|CERT\.SF|CERT\.RSA)$", n, re.I):
+            if re.match(r"^META-INF/(MANIFEST\.MF|.*\.(SF|RSA|DSA|EC))$", n, re.I):
                 trio[n] = z.read(n)
+
+        rsa_keys = [k for k in trio.keys() if re.search(r"\.(RSA|DSA|EC)$", k, re.I)]
+        if rsa_keys and "META-INF/CERT.RSA" not in trio:
+            trio["META-INF/CERT.RSA"] = trio[rsa_keys[0]]
+
+        if not rsa_keys:
+            cert_der = _extract_cert_from_v2(orig_apk)
+            if cert_der:
+                trio["META-INF/CERT.RSA"] = cert_der
+                if "META-INF/CERT.SF" not in trio:
+                    trio["META-INF/CERT.SF"] = b"Signature-Version: 1.0\r\nCreated-By: 1.0 (Android)\r\n\r\n"
+
         if not trio:
             print("[warn] original has no V1 trio")
             return
+
     with open(input_apk, "rb") as f:
         data = f.read()
     eocd = _find_eocd(data)
@@ -221,6 +254,11 @@ def main():
     ap.add_argument("--multiplex", action="store_true",
                     help="MT 式数据复用优化 + 不重排 V2 重签（dedup 模式）")
     a = ap.parse_args()
+
+    # 保证输出路径父目录存在（防止相对路径在子目录执行时找不到）
+    out_dir = os.path.dirname(os.path.abspath(a.output))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     zipalign = find_zipalign()
     if not zipalign:
@@ -286,7 +324,7 @@ def main():
 
         os.replace(v2_out, a.output)
 
-        # 真实验签：apksigner verify --min-sdk-version 24（min-sdk>=24 时只验证 V2，忽略 V1 壳）
+        # 真实验签：apksigner verify --min-sdk-version 24
         apksigner_bin = os.path.join(os.path.dirname(zipalign), "apksigner")
         if os.path.isfile(apksigner_bin):
             rv = subprocess.run(
@@ -302,6 +340,10 @@ def main():
             print("[warn] apksigner not found, skip verify (action 有 build-tools 不受影响)", flush=True)
 
         print("[ok] data multiplexing + V2 re-sign done")
+
+    if os.path.isfile(aligned):
+        try: os.remove(aligned)
+        except Exception: pass
 
     print("[ok] final signed (V2 valid, V1 preserved)")
 

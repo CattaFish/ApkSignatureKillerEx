@@ -105,7 +105,7 @@ def build_signatures(signed_data, private_key_pem):
 
 def build_block(signer):
     pair_value = signer  # v2 value = single length-prefixed signer
-    pair = u64(len(pair_value) + 8) + u32(V2_BLOCK_ID) + pair_value
+    pair = u64(len(pair_value) + 4) + u32(V2_BLOCK_ID) + pair_value
     size = len(pair) + 8 + 16
     return u64(size) + pair + u64(size) + MAGIC
 
@@ -149,12 +149,36 @@ def main():
     )
     block = build_block(signer)
 
-    # 先在原数据上修正 EOCD 的 cd_offset（EOCD 还在原位）
-    fixed = bytearray(data)
-    struct.pack_into("<I", fixed, eocd + 16, cd_offset + len(block))
+    # 4 字节对齐：在 pairs 尾部追加 padding pair（未知 ID，解析器会忽略）
+    while len(block) % 4 != 0:
+        old_size = struct.unpack_from("<Q", block, 0)[0]
+        pairs = block[8:8 + old_size - 24]
+        pad_len = 4 - (len(block) % 4)
+        pad_pair = struct.pack("<Q", 4 + pad_len) + struct.pack("<I", 0x42726577) + b"\x00" * pad_len
+        new_pairs = pairs + pad_pair
+        new_size = len(new_pairs) + 24
+        block = struct.pack("<Q", new_size) + new_pairs + struct.pack("<Q", new_size) + MAGIC
+
+    # 修正中央目录：每个 entry 的 local header offset += len(block)
+    tail = bytearray(data[cd_offset:])
+    pos = 0
+    while pos + 46 <= len(tail):
+        if tail[pos:pos + 4] != b"PK\x01\x02":
+            break
+        old_off = struct.unpack_from("<I", tail, pos + 42)[0]
+        struct.pack_into("<I", tail, pos + 42, old_off + len(block))
+        nl = struct.unpack_from("<H", tail, pos + 28)[0]
+        el = struct.unpack_from("<H", tail, pos + 30)[0]
+        cl = struct.unpack_from("<H", tail, pos + 32)[0]
+        pos += 46 + nl + el + cl
+
+    # 修正 EOCD 的 cd_offset（EOCD 也在 tail 内）
+    eocd_rel = eocd - cd_offset
+    old_cd_off = struct.unpack_from("<I", tail, eocd_rel + 16)[0]
+    struct.pack_into("<I", tail, eocd_rel + 16, old_cd_off + len(block))
 
     # 拼接：保护区 + 新签名块 + 修正后的中央目录/EOCD
-    out = protected + block + bytes(fixed[cd_offset:])
+    out = protected + block + bytes(tail)
 
     with open(a.output, "wb") as f:
         f.write(out)

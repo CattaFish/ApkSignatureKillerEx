@@ -79,6 +79,8 @@ def main():
     ap.add_argument("--input", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--orig", required=True)
+    ap.add_argument("--multiplex", action="store_true",
+                    help="MT 式数据复用优化 + 不重排 V2 重签（dedup 模式）")
     a = ap.parse_args()
 
     zipalign = find_zipalign()
@@ -104,6 +106,32 @@ def main():
 
     run(["java", "-cp", apksig_jar + os.pathsep + classes_dir,
          "KeepV1Signer", aligned, a.output, pk8, cert_der])
+    print("[ok] apksig V2 signed (V1 preserved)")
+
+    if a.multiplex:
+        # MT 式数据复用优化：相同文件共享 assets/SignedByRS/input.apk 数据段
+        opt = a.output + ".opt"
+        try:
+            run(["python3", os.path.join(src_dir, "data_multiplexing.py"),
+                 "--input", a.output, "--output", opt])
+            pub_pem = os.path.join(KEY_DIR, "v2_pub.pem")
+            pub_der = os.path.join(KEY_DIR, "v2_pub.der")
+            run(["openssl", "x509", "-in", os.path.join(KEY_DIR, "v2_cert.pem"),
+                 "-pubkey", "-noout", "-out", pub_pem])
+            run(["openssl", "pkey", "-pubin", "-outform", "DER",
+                 "-in", pub_pem, "-out", pub_der])
+            v2_out = a.output + ".v2tmp"
+            run(["python3", os.path.join(src_dir, "v2_sign.py"),
+                 "--input", opt, "--output", v2_out,
+                 "--key", key, "--cert", cert_der, "--pub", pub_der])
+            os.replace(v2_out, a.output)
+            print("[ok] data multiplexing + V2 re-sign done")
+        except SystemExit:
+            print("[warn] multiplex failed, keep unoptimized signed apk")
+            if os.path.exists(opt):
+                os.unlink(opt)
+            if os.path.exists(a.output + ".v2tmp"):
+                os.unlink(a.output + ".v2tmp")
     print("[ok] final signed (V2 valid, V1 preserved)")
 
 

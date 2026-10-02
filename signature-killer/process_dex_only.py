@@ -142,11 +142,10 @@ def main():
 
     # 非 dedup：把输入 APK 放进 assets/SignedByRS/input.apk，
     # 运行时 OriginApkCache.prepare() 才能解出 signed.apk，init() 全链才能跑
-    if not a.dedup:
-        asset_dir = os.path.join(unz, "assets", "SignedByRS")
-        os.makedirs(asset_dir, exist_ok=True)
-        shutil.copy2(a.apk, os.path.join(asset_dir, "input.apk"))
-        print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身（非 dedup）")
+    asset_dir = os.path.join(unz, "assets", "SignedByRS")
+    os.makedirs(asset_dir, exist_ok=True)
+    shutil.copy2(a.apk, os.path.join(asset_dir, "input.apk"))
+    print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身")
 
     if not os.path.isfile(KILLER_DEX):
         print("FAIL: 缺 work_killer/classes.dex")
@@ -160,10 +159,6 @@ def main():
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     unsigned = os.path.join(WORK, f"dex_only_unsigned_{ts}.apk")
-    skip_set = set()
-    if a.dedup:
-        skip_set.add("assets/SignedByRS/input.apk")
-        print("[dedup] 移除 assets/SignedByRS/input.apk 副本")
     with zipfile.ZipFile(unsigned, "w") as zout:
         for root, dirs, files in os.walk(unz):
             for f in files:
@@ -177,10 +172,13 @@ def main():
 
     print("[ok] unsigned:", unsigned)
 
-    run(["python3", os.path.join(THIS_DIR, "finalize_sign.py"),
-         "--input", unsigned,
-         "--output", a.output,
-         "--orig", a.apk])
+    sign_cmd = ["python3", os.path.join(THIS_DIR, "finalize_sign.py"),
+                "--input", unsigned,
+                "--output", a.output,
+                "--orig", a.apk]
+    if a.dedup:
+        sign_cmd.append("--multiplex")
+    run(sign_cmd)
 
 
 if __name__ == "__main__":

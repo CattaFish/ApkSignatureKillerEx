@@ -10,18 +10,18 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: '输入 APK 直链 URL（仅 workflow_dispatch 使用；push 触发时自动跳过处理）'
+        description: '输入 APK 直链 URL'
         required: false
         type: string
       mode:
-        description: '处理模式: dexonly(默认,不动资源/manifest) 或 apktool(需改资源时)'
+        description: '处理模式: dexonly 或 apktool'
         required: false
         default: 'dexonly'
         type: string
       dedup:
-        description: 'MT 式数据复用优化（默认开启）：产物中与原包相同的文件在中央目录直接指向 assets/SignedByRS/input.apk 内部数据段，删除重复数据段，体积≈原包+增量，killer 能力不降级；开启后自动进行不重排 V2 重签'
+        description: '数据复用优化'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 jobs:

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MT 式数据复用优化。
+"""MT 式数据复用优化（诊断版）。
 
 把产物 APK 中与 assets/SignedByRS/input.apk（原包）完全相同
-（文件名/压缩方式/压缩字节都一致）的文件，在中央目录里把数据偏移
+（文件名/压缩方式/CRC/压缩大小一致）的文件，在中央目录里把数据偏移
 直接指向原包内部对应数据段，并删除产物中重复的数据段。
 
-流程：先有完整签名产物（V2 有效、V1 壳），再对本文件输出做一次
+先有完整签名产物（V2 有效、V1 壳），再对本文件输出做一次
 不重排 V2 重签（v2_sign.py），否则优化会失效。
 """
 
@@ -33,6 +33,7 @@ def parse_entries(data, cd_offset, cd_size):
         if data[off:off + 4] != b"PK\x01\x02":
             break
         method = struct.unpack_from("<H", data, off + 10)[0]
+        flags = struct.unpack_from("<H", data, off + 8)[0]
         crc = struct.unpack_from("<I", data, off + 16)[0]
         comp_size = struct.unpack_from("<I", data, off + 20)[0]
         uncomp_size = struct.unpack_from("<I", data, off + 24)[0]
@@ -45,6 +46,7 @@ def parse_entries(data, cd_offset, cd_size):
             "name": name,
             "name_str": name.decode("utf-8", "replace"),
             "method": method,
+            "flags": flags,
             "crc": crc,
             "comp_size": comp_size,
             "uncomp_size": uncomp_size,
@@ -58,12 +60,17 @@ def parse_entries(data, cd_offset, cd_size):
 
 def read_entry_data(data, e):
     lho = e["local_offset"]
+    if lho < 0 or lho + 4 > len(data):
+        return None
     if data[lho:lho + 4] != b"PK\x03\x04":
         return None
     name_len = struct.unpack_from("<H", data, lho + 26)[0]
     extra_len = struct.unpack_from("<H", data, lho + 28)[0]
     start = lho + 30 + name_len + extra_len
-    return data[start:start + e["comp_size"]]
+    end = start + e["comp_size"]
+    if end > len(data):
+        return None
+    return data[start:end]
 
 
 def build_local(name_bytes, method, crc, comp_size, uncomp_size,
@@ -149,7 +156,6 @@ def main():
     if inner_e is None:
         sys.exit("missing " + INPUT_APK)
 
-    # 解出原包（要求存储/可解压，解压后以 STORE 写入产物）
     inner_comp = read_entry_data(data, inner_e)
     if inner_comp is None:
         sys.exit("bad inner apk entry")
@@ -173,19 +179,33 @@ def main():
             inner_map[ie["name_str"]] = ie
     print("[info] outer=%d entries, inner=%d entries" % (len(entries), len(inner_entries)))
 
-    # 标记可复用：名字/压缩方式/CRC/压缩大小一致且压缩字节完全一致
+    stats = {"same_name": 0, "method_diff": 0, "size_crc_diff": 0, "byte_diff": 0, "bit3": 0}
     reused = set()
     for e in entries:
-        if e["name_str"] == INPUT_APK:
+        if e["name_str"] == INPUT_APK or e["name_str"].endswith("/"):
             continue
         ie = inner_map.get(e["name_str"])
         if ie is None:
             continue
-        if e["method"] != ie["method"] or e["comp_size"] != ie["comp_size"] or e["crc"] != ie["crc"]:
+        stats["same_name"] += 1
+        if e["method"] != ie["method"]:
+            stats["method_diff"] += 1
             continue
-        if not e["name_str"].endswith("/") and read_entry_data(data, e) == read_entry_data(inner_data, ie):
+        if (e["flags"] & 0x0008) or (ie["flags"] & 0x0008):
+            stats["bit3"] += 1
+            continue
+        if e["crc"] != ie["crc"] or e["comp_size"] != ie["comp_size"] or e["uncomp_size"] != ie["uncomp_size"]:
+            stats["size_crc_diff"] += 1
+            continue
+        if read_entry_data(data, e) == read_entry_data(inner_data, ie):
             reused.add(e["name_str"])
+        else:
+            stats["byte_diff"] += 1
+
+    print("[info] match stats: %s" % (stats,))
     print("[ok] reused entries: %d / %d" % (len(reused), len(entries) - 1))
+    if len(reused) == 0:
+        print("[warn] 没有任何可复用文件，优化未生效（产物仍是完整副本，但可安装）")
 
     out = bytearray()
     centrals = []
@@ -205,8 +225,6 @@ def main():
         if e["name_str"] in reused:
             ie = inner_map[e["name_str"]]
             target = inner_data_offset + ie["local_offset"]
-            # 复用条目的 central 记录必须来自 inner（与 inner local header 完全自洽），
-            # 保留原始 flags（含 bit3 原样），只改 offset。
             centrals.append(central_from_old(inner_data, ie, target, clear_bit3=False))
             continue
         comp = read_entry_data(data, e)

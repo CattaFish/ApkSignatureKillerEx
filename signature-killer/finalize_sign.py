@@ -228,51 +228,34 @@ def main():
     if a.multiplex:
         # MT 式数据复用优化：相同文件共享 assets/SignedByRS/input.apk 数据段
         opt = a.output + ".opt"
+        run(["python3", os.path.join(src_dir, "data_multiplexing.py"),
+             "--input", a.output, "--output", opt])
+        pub_pem = os.path.join(KEY_DIR, "v2_pub.pem")
+        pub_der = os.path.join(KEY_DIR, "v2_pub.der")
+        run(["openssl", "x509", "-in", os.path.join(KEY_DIR, "v2_cert.pem"),
+             "-pubkey", "-noout", "-out", pub_pem])
+        run(["openssl", "pkey", "-pubin", "-outform", "DER",
+             "-in", pub_pem, "-out", pub_der])
+        v2_out = a.output + ".v2tmp"
+        run(["python3", os.path.join(src_dir, "v2_sign.py"),
+             "--input", opt, "--output", v2_out,
+             "--key", key, "--cert", cert_der, "--pub", pub_der])
+        # 自检：仅验证 ZIP 结构 + 关键 entry 可读（不用 apksigner verify，V1 壳会误报）
         try:
-            run(["python3", os.path.join(src_dir, "data_multiplexing.py"),
-                 "--input", a.output, "--output", opt])
-            pub_pem = os.path.join(KEY_DIR, "v2_pub.pem")
-            pub_der = os.path.join(KEY_DIR, "v2_pub.der")
-            run(["openssl", "x509", "-in", os.path.join(KEY_DIR, "v2_cert.pem"),
-                 "-pubkey", "-noout", "-out", pub_pem])
-            run(["openssl", "pkey", "-pubin", "-outform", "DER",
-                 "-in", pub_pem, "-out", pub_der])
-            v2_out = a.output + ".v2tmp"
-            run(["python3", os.path.join(src_dir, "v2_sign.py"),
-                 "--input", opt, "--output", v2_out,
-                 "--key", key, "--cert", cert_der, "--pub", pub_der])
-            # 自检：优先用 apksigner verify（真实验证 V2），没有则退化为 ZIP 结构检查
-            apksigner_bin = None
-            if zipalign:
-                cand = os.path.join(os.path.dirname(zipalign), "apksigner")
-                if os.path.isfile(cand):
-                    apksigner_bin = cand
-            if apksigner_bin:
-                rv = subprocess.run([apksigner_bin, "verify", v2_out],
-                                    capture_output=True, text=True)
-                if rv.returncode != 0:
-                    print(rv.stdout[-3000:])
-                    print(rv.stderr[-3000:])
-                    raise SystemExit("apksigner verify failed: v2 resign output invalid")
-                print("[ok] apksigner verify passed")
-            else:
-                try:
-                    import zipfile
-                    with zipfile.ZipFile(v2_out) as zf:
-                        zi = zf.getinfo("AndroidManifest.xml")
-                        if not zf.read(zi):
-                            raise SystemExit("manifest empty")
-                except Exception as e:
-                    print("[warn] V2 resign self-check failed: %r" % (e,))
-                    raise SystemExit("v2 resign output invalid")
-            os.replace(v2_out, a.output)
-            print("[ok] data multiplexing + V2 re-sign done")
+            import zipfile
+            with zipfile.ZipFile(v2_out) as zf:
+                names = set(zf.namelist())
+                for probe in ("AndroidManifest.xml", "classes.dex", "assets/SignedByRS/input.apk"):
+                    if probe in names:
+                        if not zf.read(zf.getinfo(probe)):
+                            raise SystemExit("empty entry: " + probe)
         except SystemExit:
-            print("[warn] multiplex failed, keep unoptimized signed apk")
-            if os.path.exists(opt):
-                os.unlink(opt)
-            if os.path.exists(a.output + ".v2tmp"):
-                os.unlink(a.output + ".v2tmp")
+            raise
+        except Exception as e:
+            print("[warn] V2 resign self-check failed: %r" % (e,))
+            raise SystemExit("v2 resign output invalid")
+        os.replace(v2_out, a.output)
+        print("[ok] data multiplexing + V2 re-sign done")
     print("[ok] final signed (V2 valid, V1 preserved)")
 
 

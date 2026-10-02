@@ -194,6 +194,8 @@ def build_unsigned(orig, out, replaced=None, additions=None):
     cd_off = struct.unpack_from("<I", data, eocd + 16)[0]
     cd_size = struct.unpack_from("<I", data, eocd + 12)[0]
     entries = parse_central(data, cd_off, cd_size)
+    print(f"[info] build_unsigned: orig={len(data)} bytes, orig_entries={len(entries)}, "
+          f"replaced={len(replaced)}, additions={len(additions)}")
 
     out_buf = bytearray()
     centrals = []
@@ -255,7 +257,8 @@ def build_unsigned(orig, out, replaced=None, additions=None):
     out_buf += make_eocd(cd_off_new, len(cd_bytes), len(centrals))
     with open(out, "wb") as f:
         f.write(out_buf)
-    print(f"[ok] unsigned built: {len(out_buf)} bytes ({len(centrals)} entries)")
+    print(f"[ok] unsigned built: {len(out_buf)} bytes ({len(centrals)} entries), "
+          f"input_apk={'assets/SignedByRS/input.apk' in seen}")
 
 
 def main():

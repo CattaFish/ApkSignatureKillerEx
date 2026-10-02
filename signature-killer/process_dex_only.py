@@ -183,7 +183,7 @@ def make_eocd(cd_off, cd_size, total):
 
 def build_unsigned(orig, out, replaced=None, additions=None):
     """基于原包字节增量重建：未修改 entry 原段拷贝（压缩字节不变），
-    使 data_multiplexing 能把它们指向 assets/SignedByRS/input.apk 内部。"""
+    使 data_multiplexing 能把它们指向 assets/Zcraft/input.apk 内部。"""
     replaced = dict(replaced or {})
     additions = dict(additions or {})
     with open(orig, "rb") as f:
@@ -258,7 +258,7 @@ def build_unsigned(orig, out, replaced=None, additions=None):
     with open(out, "wb") as f:
         f.write(out_buf)
     print(f"[ok] unsigned built: {len(out_buf)} bytes ({len(centrals)} entries), "
-          f"input_apk={'assets/SignedByRS/input.apk' in seen}")
+          f"input_apk={'assets/Zcraft/input.apk' in seen}")
 
 
 def main():
@@ -303,17 +303,17 @@ def main():
 
     injected_so = 0
     for abi in ABIS:
-        src = os.path.join(THIS_DIR, KILLER_LIB, abi, "libSignedByRS.so")
+        src = os.path.join(THIS_DIR, KILLER_LIB, abi, "libZcraft.so")
         if os.path.isfile(src):
-            additions[f"lib/{abi}/libSignedByRS.so"] = open(src, "rb").read()
+            additions[f"lib/{abi}/libZcraft.so"] = open(src, "rb").read()
             injected_so += 1
-            print(f"[ok] lib/{abi}/libSignedByRS.so")
+            print(f"[ok] lib/{abi}/libZcraft.so")
     if injected_so == 0:
-        print("FAIL: 没有注入 libSignedByRS.so（先运行 prepare 生成 work_killer/lib）")
+        print("FAIL: 没有注入 libZcraft.so（先运行 prepare 生成 work_killer/lib）")
         sys.exit(1)
 
-    additions["assets/SignedByRS/input.apk"] = open(a.apk, "rb").read()
-    print("[ok] assets/SignedByRS/input.apk <- 输入 APK（STORE，供数据复用引用）")
+    additions["assets/Zcraft/input.apk"] = open(a.apk, "rb").read()
+    print("[ok] assets/Zcraft/input.apk <- 输入 APK（STORE，供数据复用引用）")
 
     killer_dex_src = os.path.join(THIS_DIR, "work_killer", "classes.dex")
     if not os.path.isfile(killer_dex_src):

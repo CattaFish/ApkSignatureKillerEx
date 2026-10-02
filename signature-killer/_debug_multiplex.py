@@ -55,7 +55,7 @@ def build_fake_processed(orig_apk, out_path):
             centrals.append(dm.central_from_old(data, e, off))
 
     orig_bytes = data
-    name_b = b"assets/SignedByRS/input.apk"
+    name_b = b"assets/Zcraft/input.apk"
     crc = zlib.crc32(orig_bytes) & 0xffffffff
     off = len(buf)
     buf += dm.build_local(name_b, 0, crc, len(orig_bytes), len(orig_bytes), off, True) + orig_bytes

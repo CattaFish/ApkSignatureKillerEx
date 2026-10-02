@@ -92,7 +92,7 @@ jobs:
           echo "CMAKE_LIST_END"
           echo "SO_CHECK_START"
           so_ok=1
-          for so in work_killer/lib/*/libSignedByRS.so; do
+          for so in work_killer/lib/*/libzcraft.so; do
             echo "=== $so ==="
             if strings "$so" | grep -F 'SIGB_PATH_REWRITE_20261001_829B367' >/dev/null; then
               echo "SO_HAS_MARKER=YES"
@@ -103,7 +103,7 @@ jobs:
           done
           echo "SO_CHECK_END"
           if [ "$so_ok" != "1" ]; then
-            echo "FAIL: 检测到旧版/非本次源码编译的 libSignedByRS.so（缺少 SIGB_PATH_REWRITE marker）"
+            echo "FAIL: 检测到旧版/非本次源码编译的 libzcraft.so（缺少 SIGB_PATH_REWRITE marker）"
             exit 1
           fi
           ls -l work_killer work_killer/lib/*/

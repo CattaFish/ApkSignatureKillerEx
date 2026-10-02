@@ -30,8 +30,8 @@
 
 ```
 产物 APK
-├── assets/SignedByRS/input.apk   ← 原包完整副本（STORE 存储，不压缩）
-├── lib/<abi>/libSignedByRS.so    ← killer native（新增）
+├── assets/Zcraft/input.apk   ← 原包完整副本（STORE 存储，不压缩）
+├── lib/<abi>/libZcraft.so    ← killer native（新增）
 ├── classes2.dex                  ← killer dex（新增）
 ├── classes.dex                   ← 修改（注入 Activity <clinit>）
 ├── res/**, assets/**, ...        ← 与原包相同的文件：
@@ -72,7 +72,7 @@ apksigner verify --min-sdk-version 24   ← 真实验签，失败即中止
 
 workflow 的「数据复用优化」**默认勾选**。
 
-- 原理（MT 管理器同款）：ZIP 中央目录允许不同条目指向同一数据段 → 产物中与原包完全相同的文件（文件名/压缩方式/CRC/压缩大小/压缩字节全一致）直接指向 `assets/SignedByRS/input.apk` 内部对应偏移，删除产物中的重复数据段；
+- 原理（MT 管理器同款）：ZIP 中央目录允许不同条目指向同一数据段 → 产物中与原包完全相同的文件（文件名/压缩方式/CRC/压缩大小/压缩字节全一致）直接指向 `assets/Zcraft/input.apk` 内部对应偏移，删除产物中的重复数据段；
 - 最大节省 50%（原包体积），实测约 -46%；
 - **能力不降级**：input.apk 完整保留，运行时 `OriginApkCache.prepare()` 解出的 `signed.apk` 仍是原包字节，xhook / 路径重定向 / 签名替换全链可用；
 - 关闭 dedup 则产物为完整副本（≈2× 原包），兼容性最好但体积大。

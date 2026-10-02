@@ -223,7 +223,7 @@ def main():
     parser = argparse.ArgumentParser(description="Signature Killer pipeline")
     parser.add_argument("--apk", required=True, help="用户提供的输入 APK 路径")
     parser.add_argument("--apktool", default=os.environ.get("APKTOOL_JAR", "apktool.jar"))
-    parser.add_argument("--dedup", action="store_true", help="删除 assets/SignedByRS/input.apk 副本（数据复用优化）")
+    parser.add_argument("--dedup", action="store_true", help="删除 assets/Zcraft/input.apk 副本（数据复用优化）")
     args = parser.parse_args()
 
     apk_path = os.path.abspath(args.apk)
@@ -257,20 +257,20 @@ def main():
     package = m.group(1)
     print(f"[info] package = {package}")
 
-    asset_dir = os.path.join(DECODED, "assets", "SignedByRS")
+    asset_dir = os.path.join(DECODED, "assets", "Zcraft")
     os.makedirs(asset_dir, exist_ok=True)
     shutil.copy(apk_path, os.path.join(asset_dir, "input.apk"))
-    print("[ok] assets/SignedByRS/input.apk <- 输入 APK 自身")
+    print("[ok] assets/Zcraft/input.apk <- 输入 APK 自身")
 
     injected = 0
     for abi in ABIS:
-        src = os.path.join(KILLER_LIB, abi, "libSignedByRS.so")
+        src = os.path.join(KILLER_LIB, abi, "libZcraft.so")
         if os.path.exists(src):
             dst_dir = os.path.join(DECODED, "lib", abi)
             os.makedirs(dst_dir, exist_ok=True)
-            shutil.copy(src, os.path.join(dst_dir, "libSignedByRS.so"))
+            shutil.copy(src, os.path.join(dst_dir, "libZcraft.so"))
             injected += 1
-            print(f"[ok] lib/{abi}/libSignedByRS.so")
+            print(f"[ok] lib/{abi}/libZcraft.so")
     if injected == 0:
         print("FAIL: 没有注入任何 .so（先运行 prepare 生成 work_killer）")
         sys.exit(1)

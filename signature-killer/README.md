@@ -14,7 +14,7 @@ push 触发时只构建并上传 `killer-aar`，不处理 APK；`workflow_dispat
 ## 原理
 
 - `KillerProvider`（ContentProvider）在进程启动早期执行 `KillerApplication.init`：
-  - 从 `assets/SignedByRS/input.apk` 解包出替换文件 `signed.apk` 到 dataDir；
+  - 从 `assets/Zcraft/input.apk` 解包出替换文件 `signed.apk` 到 dataDir；
   - killPM：经 `PackageInfo.CREATOR` 注入把签名替换成 input.apk 的签名；
   - killOpen：xhook 重定向 open/fopen/stat/access/readlink/realpath/statx 路径族到 `signed.apk`。
 - `dlopen` / `android_dlopen_ext` 被 hook，任何 .so 新加载后自动同步刷新 hook，
@@ -24,7 +24,7 @@ push 触发时只构建并上传 `killer-aar`，不处理 APK；`workflow_dispat
 
 ## dedup 警告
 
-workflow 的「数据复用优化」默认关闭。开启后 `assets/SignedByRS/input.apk` 会被移除，
+workflow 的「数据复用优化」默认关闭。开启后 `assets/Zcraft/input.apk` 会被移除，
 `KillerApplication.init()` 依赖它解包出 `signed.apk`；一旦开启，killOpen（xhook）、
 redirectApkPaths（路径重定向）、killPM、PmProxy 全链失效，开启会新增多处无法过签的场景。
 

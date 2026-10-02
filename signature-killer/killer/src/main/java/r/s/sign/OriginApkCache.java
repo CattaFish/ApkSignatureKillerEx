@@ -24,7 +24,7 @@ import java.util.zip.ZipFile;
 public final class OriginApkCache {
 
     private static final String TAG = "OriginApkCache";
-    private static final String ASSET_PATH = "SignedByRS/input.apk";
+    private static final String ASSET_PATH = "Zcraft/input.apk";
     private static final String TARGET_NAME = "signed.apk";
     private static final String VERIFIED_SUFFIX = ".verified";
     private static final long LOCK_TIMEOUT_MS = 10_000L;

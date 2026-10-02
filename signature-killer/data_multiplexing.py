@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """MT 式数据复用优化（诊断版）。
 
-把产物 APK 中与 assets/SignedByRS/input.apk（原包）完全相同
+把产物 APK 中与 assets/Zcraft/input.apk（原包）完全相同
 （文件名/压缩方式/CRC/压缩大小一致）的文件，在中央目录里把数据偏移
 直接指向原包内部对应数据段，并删除产物中重复的数据段。
 
@@ -15,7 +15,7 @@ import struct
 import sys
 import zlib
 
-INPUT_APK = "assets/SignedByRS/input.apk"
+INPUT_APK = "assets/Zcraft/input.apk"
 
 
 def find_eocd(data):

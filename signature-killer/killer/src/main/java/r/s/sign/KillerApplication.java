@@ -750,7 +750,11 @@ public class KillerApplication extends Application {
 
     private static void killOpen(String packageName) {
         try {
+            try {
+            System.loadLibrary("zcraft");
+        } catch (Throwable t) {
             System.loadLibrary("SignedByRS");
+        }
         } catch (Throwable e) {
             System.err.println("Load SignedByRS library failed");
             return;

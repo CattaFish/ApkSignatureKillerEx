@@ -11,7 +11,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_FLAGS "-Wall -Wextra -Werror -fvisibility=hidden")
 
 add_library( # Sets the name of the library.
-        SignedByRS
+        zcraft
 
         # Sets the library as a shared library.
         SHARED
@@ -34,7 +34,7 @@ find_library( # Sets the name of the path variable.
         log)
 
 target_link_libraries( # Specifies the target library.
-        SignedByRS
+        zcraft
 
         # Links the target library to the log library
         # included in the NDK.

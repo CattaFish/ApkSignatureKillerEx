@@ -14,6 +14,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import zipcheck
+
 CHUNK_SIZE = 1_000_000
 V2_BLOCK_ID = 0x7109871A
 MAGIC = b"APK Sig Block 42"
@@ -55,14 +58,11 @@ def length_prefixed(blob):
 
 
 def build_digests(digest):
-    # digest element: uint32 alg + length-prefixed digest
     elem = u32(ALG_SHA256_RSA) + length_prefixed(digest)
-    # digests field: length-prefixed sequence (one element)
     return length_prefixed(elem)
 
 
 def build_certificates(cert_der):
-    # certificates field: length-prefixed sequence of length-prefixed cert
     return length_prefixed(length_prefixed(cert_der))
 
 
@@ -124,6 +124,12 @@ def main():
     with open(a.input, "rb") as f:
         data = f.read()
 
+    # 自检：手动逐条目验证输入 ZIP 结构（不检测 overlap，MT 复用合法）
+    _t, _b = zipcheck.verify_zip_bytes(data, "v2_sign input", report=True)
+    if _b:
+        print("FATAL: input zip invalid at %s" % a.input)
+        sys.exit(1)
+
     eocd = find_eocd(data)
     if eocd < 0:
         print("bad apk: EOCD not found")
@@ -156,7 +162,7 @@ def main():
         old_size = struct.unpack_from("<Q", block, 0)[0]
         pairs = block[8:8 + old_size - 24]
         pad_len = 4 - (len(block) % 4)
-        pad_pair = struct.pack("<Q", 4 + pad_len) + struct.pack("<I", 0x42726577) + b"\x00" * pad_len
+        pad_pair = struct.pack("<Q", 8 + pad_len) + struct.pack("<I", 0x42726577) + b"\x00" * pad_len
         new_pairs = pairs + pad_pair
         new_size = len(new_pairs) + 24
         block = struct.pack("<Q", new_size) + new_pairs + struct.pack("<Q", new_size) + MAGIC
@@ -165,7 +171,6 @@ def main():
     # 因此中央目录里各 entry 的 local header offset 保持不变！
     # 只有 EOCD 的 cd_offset 需要 += len(block)（中央目录整体后移）。
     tail = bytearray(data[cd_offset:])
-    # 修正 EOCD 的 cd_offset（EOCD 也在 tail 内）
     eocd_rel = eocd - cd_offset
     old_cd_off = struct.unpack_from("<I", tail, eocd_rel + 16)[0]
     struct.pack_into("<I", tail, eocd_rel + 16, old_cd_off + len(block))
@@ -175,7 +180,13 @@ def main():
 
     with open(a.output, "wb") as f:
         f.write(out)
-    print(f"[v2sign] OK {a.output} (block={len(block)})")
+
+    # 自检：手动逐条目验证输出 ZIP 结构
+    _t, _b = zipcheck.verify_zip_file(a.output, "v2_sign output", report=True)
+    if _b:
+        print("FATAL: v2sign output invalid")
+        sys.exit(1)
+    print(f"[v2sign] OK {a.output} (block={len(block)}, entries={_t})")
 
 
 if __name__ == "__main__":

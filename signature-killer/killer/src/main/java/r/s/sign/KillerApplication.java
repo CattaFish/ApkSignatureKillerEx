@@ -456,6 +456,19 @@ public class KillerApplication extends Application {
                     if (rep != null) {
                         sRedirectApkPath = rep;
                         try {
+                            byte[] originSig = readSignatureFromApk(new File(rep));
+                            if (originSig != null
+                                    && (sPmExpectedCert == null
+                                        || !java.security.MessageDigest.isEqual(sPmExpectedCert, originSig))) {
+                                Log.w(TAG, "onLoaded: refresh signature from signed.apk (external resign?)");
+                                sPmExpectedCert = originSig;
+                                cacheOriginalSignature(packageName, originSig);
+                                killPM(packageName);
+                            }
+                        } catch (Throwable t) {
+                            Log.w(TAG, "onLoaded: refresh signature failed", t);
+                        }
+                        try {
                             redirectApkPaths(appCtx);
                             Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + rep);
                         } catch (Throwable t2) {
@@ -658,8 +671,16 @@ public class KillerApplication extends Application {
         }
     }
 
+    private static Parcelable.Creator<PackageInfo> sPmOriginalCreator;
+
     private static void killPM(String packageName) {
-        Parcelable.Creator<PackageInfo> originalCreator = PackageInfo.CREATOR;
+        Parcelable.Creator<PackageInfo> originalCreator;
+        if (sPmOriginalCreator == null) {
+            originalCreator = PackageInfo.CREATOR;
+            sPmOriginalCreator = originalCreator;
+        } else {
+            originalCreator = sPmOriginalCreator;
+        }
         Parcelable.Creator<PackageInfo> creator = new Parcelable.Creator<PackageInfo>() {
             @Override
             public PackageInfo createFromParcel(Parcel source) {

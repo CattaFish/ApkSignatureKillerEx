@@ -286,12 +286,12 @@ def main():
 
         os.replace(v2_out, a.output)
 
-        # 真实验签：apksigner verify（只验 V2，跳过 V1 壳）
+        # 真实验签：apksigner verify --min-sdk-version 24（min-sdk>=24 时只验证 V2，忽略 V1 壳）
         apksigner_bin = os.path.join(os.path.dirname(zipalign), "apksigner")
         if os.path.isfile(apksigner_bin):
             rv = subprocess.run(
-                [apksigner_bin, "verify", "--v1-signing-enabled", "false",
-                 "--v2-signing-enabled", "true", a.output],
+                [apksigner_bin, "verify", "--verbose", "--min-sdk-version", "24",
+                 a.output],
                 capture_output=True, text=True)
             if rv.returncode != 0:
                 print(rv.stdout[-3000:], flush=True)

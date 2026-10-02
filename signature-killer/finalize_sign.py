@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only (preserve V1)."""
-import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile
+import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile, zlib
 
 KEY_DIR = "work_killer"
 
@@ -51,8 +51,93 @@ def ensure_keys():
              "-outform", "DER", "-out", pk8])
     return key, pk8, cert_der
 
+# ---------- ZIP 字节级工具（保留原压缩字节，供数据复用） ----------
+
+def _find_eocd(data):
+    for i in range(len(data) - 22, max(0, len(data) - 65557) - 1, -1):
+        if data[i:i + 4] == b"PK\x05\x06":
+            return i
+    return -1
+
+
+def _parse_central(data, cd_off, cd_size):
+    entries = []
+    off = cd_off
+    end = cd_off + cd_size
+    while off + 46 <= end:
+        if data[off:off + 4] != b"PK\x01\x02":
+            break
+        method = struct.unpack_from("<H", data, off + 10)[0]
+        flags = struct.unpack_from("<H", data, off + 8)[0]
+        crc = struct.unpack_from("<I", data, off + 16)[0]
+        comp = struct.unpack_from("<I", data, off + 20)[0]
+        uncomp = struct.unpack_from("<I", data, off + 24)[0]
+        nl = struct.unpack_from("<H", data, off + 28)[0]
+        el = struct.unpack_from("<H", data, off + 30)[0]
+        cl = struct.unpack_from("<H", data, off + 32)[0]
+        lho = struct.unpack_from("<I", data, off + 42)[0]
+        name = data[off + 46:off + 46 + nl]
+        entries.append({
+            "name": name,
+            "name_str": name.decode("utf-8", "replace"),
+            "method": method, "flags": flags, "crc": crc,
+            "comp": comp, "uncomp": uncomp,
+            "nl": nl, "el": el, "cl": cl, "lho": lho,
+        })
+        off += 46 + nl + el + cl
+    return entries
+
+
+def _local_len(data, lho):
+    nl = struct.unpack_from("<H", data, lho + 26)[0]
+    el = struct.unpack_from("<H", data, lho + 28)[0]
+    return 30 + nl + el
+
+
+def _make_local(name_b, method, flags, crc, comp, uncomp):
+    lh = bytearray(30 + len(name_b))
+    lh[0:4] = b"PK\x03\x04"
+    struct.pack_into("<H", lh, 4, 20)
+    struct.pack_into("<H", lh, 6, flags)
+    struct.pack_into("<H", lh, 8, method)
+    struct.pack_into("<I", lh, 14, crc)
+    struct.pack_into("<I", lh, 18, comp)
+    struct.pack_into("<I", lh, 22, uncomp)
+    struct.pack_into("<H", lh, 26, len(name_b))
+    struct.pack_into("<H", lh, 28, 0)
+    lh[30:30 + len(name_b)] = name_b
+    return bytes(lh)
+
+
+def _make_central(name_b, method, flags, crc, comp, uncomp, offset):
+    ce = bytearray(46 + len(name_b))
+    ce[0:4] = b"PK\x01\x02"
+    struct.pack_into("<H", ce, 4, 20)
+    struct.pack_into("<H", ce, 6, 20)
+    struct.pack_into("<H", ce, 8, flags)
+    struct.pack_into("<H", ce, 10, method)
+    struct.pack_into("<I", ce, 16, crc)
+    struct.pack_into("<I", ce, 20, comp)
+    struct.pack_into("<I", ce, 24, uncomp)
+    struct.pack_into("<H", ce, 28, len(name_b))
+    struct.pack_into("<I", ce, 42, offset)
+    ce[46:] = name_b
+    return bytes(ce)
+
+
+def _make_eocd(cd_off, cd_size, total):
+    e = bytearray(22)
+    e[0:4] = b"PK\x05\x06"
+    struct.pack_into("<H", e, 8, total)
+    struct.pack_into("<H", e, 10, total)
+    struct.pack_into("<I", e, 12, cd_size)
+    struct.pack_into("<I", e, 16, cd_off)
+    return bytes(e)
+
+
 def inject_v1(input_apk, orig_apk):
-    """Copy original META-INF/MANIFEST.MF, CERT.SF, CERT.RSA into unsigned APK."""
+    """字节保留式注入原版 V1 三件套：不重新压缩任何 entry，
+    保证 data multiplexing 复用条件（相同文件压缩字节一致）成立。"""
     with zipfile.ZipFile(orig_apk) as z:
         trio = {}
         for n in z.namelist():
@@ -61,18 +146,50 @@ def inject_v1(input_apk, orig_apk):
         if not trio:
             print("[warn] original has no V1 trio")
             return
-    tmp = input_apk + ".tmp"
-    with zipfile.ZipFile(input_apk, "r") as zin, zipfile.ZipFile(tmp, "w") as zout:
-        for it in zin.infolist():
-            if re.match(r"META-INF/(MANIFEST\.MF|CERT\.SF|CERT\.RSA)$", it.filename, re.I):
-                continue
-            zout.writestr(it, zin.read(it.filename))
-        for name, data in trio.items():
-            zi = zipfile.ZipInfo(name)
-            zi.external_attr = 0o644 << 16
-            zout.writestr(zi, data)
-    os.replace(tmp, input_apk)
-    print("[ok] V1 trio injected:", list(trio.keys()))
+    with open(input_apk, "rb") as f:
+        data = f.read()
+    eocd = _find_eocd(data)
+    if eocd < 0:
+        raise SystemExit("bad zip in inject_v1")
+    cd_off = struct.unpack_from("<I", data, eocd + 16)[0]
+    cd_size = struct.unpack_from("<I", data, eocd + 12)[0]
+    entries = _parse_central(data, cd_off, cd_size)
+    skip = set(trio.keys())
+    out = bytearray()
+    centrals = []
+    seen = set()
+    for e in entries:
+        ns = e["name_str"]
+        if ns in seen:
+            continue
+        seen.add(ns)
+        if ns in skip:
+            continue
+        seg_start = e["lho"]
+        seg_len = _local_len(data, seg_start) + e["comp"]
+        seg = bytearray(data[seg_start:seg_start + seg_len])
+        if struct.unpack_from("<H", seg, 6)[0] & 0x0008:
+            struct.pack_into("<H", seg, 6, e["flags"] & ~0x0008)
+            struct.pack_into("<H", seg, 8, e["method"])
+            struct.pack_into("<I", seg, 14, e["crc"])
+            struct.pack_into("<I", seg, 18, e["comp"])
+            struct.pack_into("<I", seg, 22, e["uncomp"])
+        centrals.append(_make_central(e["name"], e["method"], e["flags"] & ~0x0008,
+                                      e["crc"], e["comp"], e["uncomp"], len(out)))
+        out += seg
+    for name, payload in trio.items():
+        name_b = name.encode("utf-8")
+        crc = zlib.crc32(payload) & 0xffffffff
+        off = len(out)
+        out += _make_local(name_b, 0, 0, crc, len(payload), len(payload)) + payload
+        centrals.append(_make_central(name_b, 0, 0, crc, len(payload), len(payload), off))
+    cd_off_new = len(out)
+    cd_bytes = b"".join(centrals)
+    out += cd_bytes
+    out += _make_eocd(cd_off_new, len(cd_bytes), len(centrals))
+    with open(input_apk, "wb") as f:
+        f.write(out)
+    print("[ok] V1 trio injected (byte-preserving):", list(trio.keys()))
 
 def main():
     ap = argparse.ArgumentParser()

@@ -164,8 +164,6 @@ def main():
             for f in files:
                 full = os.path.join(root, f)
                 relf = os.path.relpath(full, unz)
-                if relf.replace("\\", "/") in skip_set:
-                    continue
                 zout.write(full, relf)
         zout.write(KILLER_DEX, new_dex_name)
         print(f"[ok] killer dex -> {new_dex_name}")

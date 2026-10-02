@@ -104,8 +104,10 @@ def build_signatures(signed_data, private_key_pem):
 
 
 def build_block(signer):
-    pair_value = signer  # v2 value = single length-prefixed signer
-    pair = u64(len(pair_value) + 4) + u32(V2_BLOCK_ID) + pair_value
+    # 0x7109871a 的 value = length-prefixed signer（无 count 字段）
+    pair_value = length_prefixed(signer)
+    # pair size 字段 = 自身 8 + id 4 + value
+    pair = u64(len(pair_value) + 12) + u32(V2_BLOCK_ID) + pair_value
     size = len(pair) + 8 + 16
     return u64(size) + pair + u64(size) + MAGIC
 

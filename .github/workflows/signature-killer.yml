@@ -19,9 +19,9 @@ on:
         default: 'dexonly'
         type: string
       dedup:
-        description: 'MT 式数据复用优化（默认关闭）：产物中与原包相同的文件在中央目录直接指向 assets/SignedByRS/input.apk 内部数据段，删除重复数据段，体积≈原包+增量，killer 能力不降级；开启后自动进行不重排 V2 重签'
+        description: 'MT 式数据复用优化（默认开启）：产物中与原包相同的文件在中央目录直接指向 assets/SignedByRS/input.apk 内部数据段，删除重复数据段，体积≈原包+增量，killer 能力不降级；开启后自动进行不重排 V2 重签'
         required: false
-        default: 'false'
+        default: 'true'
         type: boolean
 
 jobs:

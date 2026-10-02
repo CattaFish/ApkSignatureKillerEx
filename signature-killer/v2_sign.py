@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Custom APK V2 signer. Keeps all ZIP entries (incl. V1 shell files) intact.
-Implements APK Signature Scheme v2:
-  - SHA-256 with RSA (PKCS#1 v1.5)
-  - 1,000,000 byte content chunks (0xA5 prefix, 0x5A total)
-  - signatures over full signed_data bytes (not DigestInfo+digest)
-  - signing block size = len(pairs) + 24
+"""APK Signature Scheme v2 signer — 严格对齐 apksig 解析结构。
+
+value        = LP( LP(signer) )
+signer       = LP(sd_body) + LP(signatures_records) + LP(pub)
+signed_data  = LP( digests + certs + attrs + minSdk + maxSdk )
+digests      = LP( LP( alg + LP(digest) ) )
+signatures   = LP( LP( alg + LP(sig) ) )
+摘要块        = SHA256(0xa5 + uint32块长 + 块内容)，顶级 = SHA256(0x5a + uint32块数 + 块摘要)
 """
 import argparse
 import hashlib
@@ -25,6 +27,18 @@ MIN_SDK = 24
 MAX_SDK = 0x7FFFFFFF
 
 
+def u32(n):
+    return struct.pack("<I", n)
+
+
+def u64(n):
+    return struct.pack("<Q", n)
+
+
+def length_prefixed(blob):
+    return u32(len(blob)) + blob
+
+
 def find_eocd(data):
     for i in range(len(data) - 22, max(0, len(data) - 65557) - 1, -1):
         if data[i:i + 4] == b"PK\x05\x06":
@@ -32,14 +46,22 @@ def find_eocd(data):
     return -1
 
 
-def content_digest(data):
+def content_digest(parts):
+    """apksig ApkSigningBlockUtils.computeOneMbChunkContentDigests:
+    - 三个分区（内容区/中央目录/EOCD）各自独立切块，块大小 1MB = 1024*1024
+    - 空段不产生块
+    - 块摘要 = SHA256(0xa5 + uint32块长(LE) + 块内容)
+    - 最终   = SHA256(0x5a + uint32块总数(LE) + 全部块摘要按序串联)
+    """
     chunks = []
-    pos = 0
-    while pos < len(data):
-        chunk = data[pos:pos + CHUNK_SIZE]
-        chunks.append(hashlib.sha256(b"\xA5" + chunk).digest())
-        pos += len(chunk)
-    h = hashlib.sha256(b"\x5A")
+    for part in parts:
+        pos = 0
+        while pos < len(part):
+            block = part[pos:pos + 1024 * 1024]
+            chunks.append(
+                hashlib.sha256(b"\xA5" + struct.pack("<I", len(block)) + block).digest())
+            pos += len(block)
+    h = hashlib.sha256(b"\x5A" + struct.pack("<I", len(chunks)))
     for c in chunks:
         h.update(c)
     return h.digest()
@@ -57,21 +79,29 @@ def length_prefixed(blob):
     return u32(len(blob)) + blob
 
 
+def find_eocd(data):
+    for i in range(len(data) - 22, max(0, len(data) - 65557) - 1, -1):
+        if data[i:i + 4] == b"PK\x05\x06":
+            return i
+    return -1
+
+
 def build_digests(digest):
-    # digest record = uint32 alg + length-prefixed digest，整个 record 再 length-prefixed
-    elem = length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(digest))
-    return length_prefixed(elem)
+    # digests 字段 = LP( LP( alg + LP(digest) ) )
+    return length_prefixed(length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(digest)))
 
 
 def build_certificates(cert_der):
+    # certificates 字段 = LP( LP(cert) )
     return length_prefixed(length_prefixed(cert_der))
 
 
-def build_signed_data(digest, cert_der):
-    digests = build_digests(digest)
-    certs = build_certificates(cert_der)
-    attrs = length_prefixed(b"")
-    return digests + certs + attrs + u32(MIN_SDK) + u32(MAX_SDK)
+def build_signatures(sd_body, private_key_pem):
+    # signatures 字段 = LP( LP( alg + LP(sig) ) )，签名覆盖 sd_body（不含 LP）
+    signature = sign_bytes(private_key_pem, sd_body)
+    if not signature:
+        raise RuntimeError("RSA signature failed")
+    return length_prefixed(length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(signature)))
 
 
 def sign_bytes(private_key_pem, payload):
@@ -96,20 +126,18 @@ def sign_bytes(private_key_pem, payload):
         os.unlink(out_path)
 
 
-def build_signatures(signed_data, private_key_pem):
-    signature = sign_bytes(private_key_pem, signed_data)
-    if not signature:
-        raise RuntimeError("RSA signature failed")
-    # signature record = uint32 alg + length-prefixed signature，整个 record 再 length-prefixed
-    rec = length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(signature))
-    return length_prefixed(rec)
+def build_signed_data(digest, cert_der):
+    digests = build_digests(digest)
+    certs = build_certificates(cert_der)
+    attrs = length_prefixed(b"")
+    # 返回 sd_body（签名覆盖的字节，不含外层 LP）
+    return digests + certs + attrs + u32(MIN_SDK) + u32(MAX_SDK)
 
 
-def build_block(signer):
-    # 0x7109871a 的 value = length-prefixed signer（无 count 字段）
-    pair_value = length_prefixed(signer)
-    # pair size 字段 = 自身 8 + id 4 + value
-    pair = u64(len(pair_value) + 12) + u32(V2_BLOCK_ID) + pair_value
+def build_block(signer_bytes):
+    # value = LP( LP(signer) )；pair size = 4 + len(value)
+    pair_value = length_prefixed(length_prefixed(signer_bytes))
+    pair = u64(len(pair_value) + 4) + u32(V2_BLOCK_ID) + pair_value
     size = len(pair) + 8 + 16
     return u64(size) + pair + u64(size) + MAGIC
 
@@ -126,7 +154,6 @@ def main():
     with open(a.input, "rb") as f:
         data = f.read()
 
-    # 自检：手动逐条目验证输入 ZIP 结构（不检测 overlap，MT 复用合法）
     _t, _b = zipcheck.verify_zip_bytes(data, "v2_sign input", report=True)
     if _b:
         print("FATAL: input zip invalid at %s" % a.input)
@@ -142,48 +169,61 @@ def main():
         print("bad apk: central dir range")
         sys.exit(1)
 
-    protected = data[:cd_offset]
-    digest = content_digest(protected)
-
     with open(a.cert, "rb") as f:
         cert_der = f.read()
     with open(a.pub, "rb") as f:
         pub_der = f.read()
 
-    signed_data = build_signed_data(digest, cert_der)
-    signatures = build_signatures(signed_data, a.key)
-    signer = length_prefixed(
-        length_prefixed(signed_data)
-        + length_prefixed(signatures)
-        + length_prefixed(pub_der)
-    )
-    block = build_block(signer)
+    # block 长度只依赖固定字段（digest 恒 32B、证书、公钥、签名），
+    # 先用占位 digest 构建一次，确定精确的 block 长度（含 padding）。
+    dummy_sd = build_signed_data(b"\x00" * 32, cert_der)
+    dummy_sig = build_signatures(dummy_sd, a.key)
+    dummy_signer = (length_prefixed(dummy_sd)
+                    + dummy_sig
+                    + length_prefixed(pub_der))
+    block = build_block(dummy_signer)
+    block_len = len(block)
 
-    # 4 字节对齐：在 pairs 尾部追加 padding pair（未知 ID，解析器会忽略）
+    # 按 apksig 源码：digest 的三个分区 = 内容区 / 中央目录 / EOCD
+    # EOCD 参与摘要前，需把 cd_offset 字段改成"签名块起始偏移"（=原cd_offset，
+    # 因为签名块就插在中央目录前，原cd_offset 正好是内容区长度=签名块起始）。
+    # EOCD 参与摘要时，cd_offset 字段应指向"签名块起始偏移"（= 原 cd_offset）
+    eocd_part = bytearray(data[eocd:])
+    struct.pack_into("<I", eocd_part, 16, cd_offset)  # EOCD 内偏移 16 就是 cd_offset 字段
+    digest = content_digest([data[:cd_offset], data[cd_offset:eocd], bytes(eocd_part)])
+
+    sd_body = build_signed_data(digest, cert_der)
+    signatures = build_signatures(sd_body, a.key)
+
+    signer_bytes = (length_prefixed(sd_body)
+                    + signatures
+                    + length_prefixed(pub_der))
+    block = build_block(signer_bytes)
+
+    # 4 字节对齐：追加 padding pair（size 字段 = 4 + pad_len）
     while len(block) % 4 != 0:
         old_size = struct.unpack_from("<Q", block, 0)[0]
         pairs = block[8:8 + old_size - 24]
         pad_len = 4 - (len(block) % 4)
-        pad_pair = struct.pack("<Q", 8 + pad_len) + struct.pack("<I", 0x42726577) + b"\x00" * pad_len
+        pad_pair = (struct.pack("<Q", 4 + pad_len)
+                    + struct.pack("<I", 0x42726577)
+                    + b"\x00" * pad_len)
         new_pairs = pairs + pad_pair
         new_size = len(new_pairs) + 24
-        block = struct.pack("<Q", new_size) + new_pairs + struct.pack("<Q", new_size) + MAGIC
+        block = (struct.pack("<Q", new_size) + new_pairs
+                 + struct.pack("<Q", new_size) + MAGIC)
 
-    # 注意：插入签名块不会移动"内容区"（local headers + data），
-    # 因此中央目录里各 entry 的 local header offset 保持不变！
-    # 只有 EOCD 的 cd_offset 需要 += len(block)（中央目录整体后移）。
+    # 内容区（local headers + data）不移动，中央目录各 entry offset 保持；
+    # 仅 EOCD 的 cd_offset += len(block)（digest 里 taile_fixed 已同样修正）。
     tail = bytearray(data[cd_offset:])
     eocd_rel = eocd - cd_offset
     old_cd_off = struct.unpack_from("<I", tail, eocd_rel + 16)[0]
     struct.pack_into("<I", tail, eocd_rel + 16, old_cd_off + len(block))
 
-    # 拼接：保护区 + 新签名块 + 修正后的中央目录/EOCD
-    out = protected + block + bytes(tail)
-
+    out = data[:cd_offset] + block + bytes(tail)
     with open(a.output, "wb") as f:
         f.write(out)
 
-    # 自检：手动逐条目验证输出 ZIP 结构
     _t, _b = zipcheck.verify_zip_file(a.output, "v2_sign output", report=True)
     if _b:
         print("FATAL: v2sign output invalid")

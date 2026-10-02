@@ -88,12 +88,13 @@ def build_local(name_bytes, method, crc, comp_size, uncomp_size,
     return bytes(lh)
 
 
-def central_from_old(data, e, new_offset):
+def central_from_old(data, e, new_offset, clear_bit3=True):
     ce = bytearray(data[e["central_offset"]:e["central_offset"] + e["central_len"]])
     struct.pack_into("<I", ce, 42, new_offset)
-    flags = struct.unpack_from("<H", ce, 8)[0]
-    flags &= ~0x0008
-    struct.pack_into("<H", ce, 8, flags)
+    if clear_bit3:
+        flags = struct.unpack_from("<H", ce, 8)[0]
+        flags &= ~0x0008
+        struct.pack_into("<H", ce, 8, flags)
     return bytes(ce)
 
 
@@ -204,7 +205,9 @@ def main():
         if e["name_str"] in reused:
             ie = inner_map[e["name_str"]]
             target = inner_data_offset + ie["local_offset"]
-            centrals.append(central_from_old(data, e, target))
+            # 复用条目的 central 记录必须来自 inner（与 inner local header 完全自洽），
+            # 保留原始 flags（含 bit3 原样），只改 offset。
+            centrals.append(central_from_old(inner_data, ie, target, clear_bit3=False))
             continue
         comp = read_entry_data(data, e)
         if comp is None:

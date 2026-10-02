@@ -159,19 +159,10 @@ def main():
         new_size = len(new_pairs) + 24
         block = struct.pack("<Q", new_size) + new_pairs + struct.pack("<Q", new_size) + MAGIC
 
-    # 修正中央目录：每个 entry 的 local header offset += len(block)
+    # 注意：插入签名块不会移动"内容区"（local headers + data），
+    # 因此中央目录里各 entry 的 local header offset 保持不变！
+    # 只有 EOCD 的 cd_offset 需要 += len(block)（中央目录整体后移）。
     tail = bytearray(data[cd_offset:])
-    pos = 0
-    while pos + 46 <= len(tail):
-        if tail[pos:pos + 4] != b"PK\x01\x02":
-            break
-        old_off = struct.unpack_from("<I", tail, pos + 42)[0]
-        struct.pack_into("<I", tail, pos + 42, old_off + len(block))
-        nl = struct.unpack_from("<H", tail, pos + 28)[0]
-        el = struct.unpack_from("<H", tail, pos + 30)[0]
-        cl = struct.unpack_from("<H", tail, pos + 32)[0]
-        pos += 46 + nl + el + cl
-
     # 修正 EOCD 的 cd_offset（EOCD 也在 tail 内）
     eocd_rel = eocd - cd_offset
     old_cd_off = struct.unpack_from("<I", tail, eocd_rel + 16)[0]

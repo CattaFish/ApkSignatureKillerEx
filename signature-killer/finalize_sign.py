@@ -124,6 +124,16 @@ def main():
             run(["python3", os.path.join(src_dir, "v2_sign.py"),
                  "--input", opt, "--output", v2_out,
                  "--key", key, "--cert", cert_der, "--pub", pub_der])
+            # 自检：必须是合法 ZIP 且 AndroidManifest.xml 可完整读取（含 CRC 校验）
+            try:
+                import zipfile
+                with zipfile.ZipFile(v2_out) as zf:
+                    zi = zf.getinfo("AndroidManifest.xml")
+                    if not zf.read(zi):
+                        raise SystemExit("manifest empty")
+            except Exception as e:
+                print("[warn] V2 resign self-check failed: %r" % (e,))
+                raise SystemExit("v2 resign output invalid")
             os.replace(v2_out, a.output)
             print("[ok] data multiplexing + V2 re-sign done")
         except SystemExit:

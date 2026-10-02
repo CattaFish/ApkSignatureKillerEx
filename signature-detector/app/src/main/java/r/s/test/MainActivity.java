@@ -137,6 +137,11 @@ public class MainActivity extends Activity {
         append(sb, "From V2Block SVC: ", strV2BlockSvc,
                 sigV2BlockSvc != null && signatureExpected.equals(strV2BlockSvc) ? Color.BLUE : Color.RED);
 
+        // ---- 完全模拟 com.sina.syscall 检测链路 ----
+        String svcMeta = probeSvcMetaInf();
+        append(sb, "From SVC MetaInf: ", svcMeta,
+                svcMeta.equals(signatureExpected) ? Color.BLUE : Color.RED);
+
         // ---- stage 2 probes: 绕开 getPackageResourcePath() 的信息来源 ----
         String normApkPath = extractNormalApkPathFromMaps();
         String pathRes = getPackageResourcePath();
@@ -253,6 +258,30 @@ public class MainActivity extends Activity {
         // raw syscall 直读磁盘 base.apk：绕过所有用户态 hook，必读 fake V2 证书
         byte[] apkBytes = readRawApkBytesViaSvc();
         return signatureFromApkSigningBlockBytes(apkBytes);
+    }
+
+    /**
+     * 模拟 com.sina.syscall 的完整检测链路：
+     *   raw syscall 读 /proc/self/maps → 提取真实 base.apk 路径（不经过
+     *   getPackageResourcePath()，避免被 LoadedApk 路径重定向影响）→
+     *   raw syscall 读整包 → 手动解析 ZIP 找 META-INF/*.RSA → 提取证书。
+     *
+     * 与 From SVC 的区别：From SVC 用 openAt(getPackageResourcePath())，
+     * 路径可能已被 killer 的 redirectApkPaths 改写成 signed.apk；
+     * 这里从 maps 直接拿磁盘真实安装路径，完全绕过 Java 层与 xhook。
+     */
+    private String probeSvcMetaInf() {
+        try {
+            String realPath = extractRealApkPathFromMaps();
+            if (realPath == null) return "ERR:no-path";
+            byte[] apkBytes = readRawApkBytesViaPath(realPath);
+            if (apkBytes == null) return "ERR:read";
+            byte[] cert = signatureFromApkV1Bytes(apkBytes);
+            if (cert == null) return "ERR:no-cert";
+            return md5(cert);
+        } catch (Throwable t) {
+            return "ERR:" + t.getClass().getSimpleName();
+        }
     }
 
     private String extractNormalApkPathFromMaps() {

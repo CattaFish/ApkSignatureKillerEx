@@ -19,6 +19,7 @@
 | From V2Block SVC | raw syscall 直读 base.apk + 手动解析 v2/v3 block | 必然红（V2 块内永远是新证书，免 root 结构性死穴） |
 | From APK | 直接读 APK 内 META-INF 证书 | open 重定向到替换 APK（蓝） |
 | From SVC | 原始 syscall 读文件，绕过用户态 hook | 显示 fake.jks 真签名（红） |
+| From SVC MetaInf | raw syscall 读 maps 提取真实 base.apk 路径 → raw syscall 读整包 → 手动解析 META-INF/*.RSA 证书（完全模拟 com.sina.syscall） | killer 处理（原版三件套保留）后显示原签名（蓝）；外部重签/签名器重写 CERT.RSA 后显示新签名（红） |
 | ch4 | native fopen 读证书 | PASS（蓝） |
 | ch5 | stat normal vs raw syscall inode | HOOKED（蓝） |
 | ch7 | maps 敏感词 + APK inode 一致性 | HOOKED（蓝） |

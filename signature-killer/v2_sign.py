@@ -58,7 +58,8 @@ def length_prefixed(blob):
 
 
 def build_digests(digest):
-    elem = u32(ALG_SHA256_RSA) + length_prefixed(digest)
+    # digest record = uint32 alg + length-prefixed digest，整个 record 再 length-prefixed
+    elem = length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(digest))
     return length_prefixed(elem)
 
 
@@ -99,7 +100,8 @@ def build_signatures(signed_data, private_key_pem):
     signature = sign_bytes(private_key_pem, signed_data)
     if not signature:
         raise RuntimeError("RSA signature failed")
-    rec = u32(ALG_SHA256_RSA) + length_prefixed(signature)
+    # signature record = uint32 alg + length-prefixed signature，整个 record 再 length-prefixed
+    rec = length_prefixed(u32(ALG_SHA256_RSA) + length_prefixed(signature))
     return length_prefixed(rec)
 
 

@@ -285,6 +285,22 @@ def main():
             raise SystemExit("v2 resign output invalid")
 
         os.replace(v2_out, a.output)
+
+        # 真实验签：apksigner verify（只验 V2，跳过 V1 壳）
+        apksigner_bin = os.path.join(os.path.dirname(zipalign), "apksigner")
+        if os.path.isfile(apksigner_bin):
+            rv = subprocess.run(
+                [apksigner_bin, "verify", "--v1-signing-enabled", "false",
+                 "--v2-signing-enabled", "true", a.output],
+                capture_output=True, text=True)
+            if rv.returncode != 0:
+                print(rv.stdout[-3000:], flush=True)
+                print(rv.stderr[-3000:], flush=True)
+                raise SystemExit("apksigner V2 verify failed (final output)")
+            print("[ok] apksigner V2 verify passed", flush=True)
+        else:
+            print("[warn] apksigner not found, skip verify (action 有 build-tools 不受影响)", flush=True)
+
         print("[ok] data multiplexing + V2 re-sign done")
 
     print("[ok] final signed (V2 valid, V1 preserved)")

@@ -78,27 +78,8 @@ def build_fake_processed(orig_apk, out_path):
 
 
 def verify(apk_path, label):
-    bad = []
-    total = 0
-    try:
-        zf = zipfile.ZipFile(apk_path)
-    except Exception as ex:
-        print("[FAIL] %s: cannot open: %r" % (label, ex))
-        return [(label, -1, repr(ex))]
-    with zf:
-        for info in zf.infolist():
-            total += 1
-            try:
-                if not info.is_dir():
-                    zf.read(info)
-            except Exception as ex:
-                bad.append((info.filename, info.header_offset, repr(ex)))
-    if bad:
-        print("[FAIL] %s: %d bad entries, first %d:" % (label, len(bad), min(20, len(bad))))
-        for name, off, err in bad[:20]:
-            print("   bad entry %s (offset=%d): %s" % (name, off, err))
-    else:
-        print("[ok] %s: all %d entries readable" % (label, total))
+    import zipcheck
+    _, bad = zipcheck.verify_zip_file(apk_path, label)
     return bad
 
 

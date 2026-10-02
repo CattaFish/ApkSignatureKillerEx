@@ -5,6 +5,8 @@
 """
 import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile, zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 KEY_DIR = "work_killer"
 
 def run(cmd):
@@ -207,28 +209,9 @@ def inject_v1(input_apk, orig_apk):
     print("[ok] V1 trio injected (byte-preserving):", list(trio.keys()))
 
 def verify_zip_entries(path, label):
-    """逐 entry 验证 ZIP 可读，返回 (total, bad_list)。"""
-    bad = []
-    total = 0
-    try:
-        zf = zipfile.ZipFile(path)
-    except Exception as e:
-        return 0, [("<zip-open>", -1, repr(e))]
-    with zf:
-        for info in zf.infolist():
-            total += 1
-            try:
-                if not info.is_dir():
-                    zf.read(info)
-            except Exception as e:
-                bad.append((info.filename, info.header_offset, repr(e)))
-    if bad:
-        print("[FAIL] %s: %d bad entries of %d" % (label, len(bad), total), flush=True)
-        for name, off, err in bad[:20]:
-            print("   bad entry %s (offset=%d): %s" % (name, off, err), flush=True)
-    else:
-        print("[ok] %s: all %d entries readable" % (label, total), flush=True)
-    return total, bad
+    """逐条目手动验证 ZIP 结构（不检测 overlap，MT 复用合法）。"""
+    import zipcheck
+    return zipcheck.verify_zip_file(path, label)
 
 def main():
     ap = argparse.ArgumentParser()

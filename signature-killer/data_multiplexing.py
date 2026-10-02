@@ -213,10 +213,11 @@ def main():
     # 1) 先写原包数据段（STORE，data 4 字节对齐，供复用指向）
     inner_lh = build_local(inner_e["name"], 0, inner_e["crc"],
                            len(inner_data), len(inner_data), len(out), True)
-    inner_data_offset = len(out)
+    inner_lh_offset = len(out)            # input.apk local header 起点（central 里 offset 指向这里）
+    inner_data_start = len(out) + len(inner_lh)   # ★ 数据段起点：复用条目以此基准 + 原包内偏移
     out += inner_lh + inner_data
     centrals.append(build_central(inner_e["name"], 0, inner_e["crc"],
-                                  len(inner_data), len(inner_data), inner_data_offset))
+                                  len(inner_data), len(inner_data), inner_lh_offset))
 
     # 2) 其余 entry
     for e in entries:
@@ -224,8 +225,11 @@ def main():
             continue
         if e["name_str"] in reused:
             ie = inner_map[e["name_str"]]
-            target = inner_data_offset + ie["local_offset"]
-            centrals.append(central_from_old(inner_data, ie, target, clear_bit3=False))
+            # ★ 目标 = 外层 input.apk 数据段起点 + 原包内该文件的 local header 偏移
+            #   （input.apk 数据段 = 原包完整字节，含原包各 local header）
+            target = inner_data_start + ie["local_offset"]
+            # 复制外层 central 记录（保留 apksig 后的对齐 extra 等），只改 offset 并清 bit3
+            centrals.append(central_from_old(data, e, target, clear_bit3=True))
             continue
         comp = read_entry_data(data, e)
         if comp is None:

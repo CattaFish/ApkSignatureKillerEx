@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only (preserve V1)."""
+"""Final signing stage: inject original V1 trio -> zipalign -> apksig V2-only.
+--multiplex 时：data_multiplexing（MT式复用）-> v2_sign（不重排 V2 重签）-> 逐 entry 自检。
+失败不静默降级，直接报错；调试产物保留 *.debug，workflow 会一并上传。
+"""
 import argparse, base64, hashlib, os, re, shutil, struct, subprocess, sys, tempfile, zipfile, zlib
 
 KEY_DIR = "work_killer"
@@ -13,6 +16,17 @@ def run(cmd):
         sys.exit(f"FAIL: {cmd[0]}")
     return r
 
+def run_visible(cmd):
+    print("+", " ".join(cmd), flush=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.stdout:
+        print(r.stdout, end="", flush=True)
+    if r.stderr:
+        print(r.stderr, end="", flush=True)
+    if r.returncode != 0:
+        sys.exit(f"FAIL: {cmd[0]} (exit {r.returncode})")
+    return r
+
 def find_zipalign():
     h = os.environ.get("ANDROID_HOME", "")
     if h:
@@ -20,7 +34,8 @@ def find_zipalign():
         if os.path.isdir(bt):
             for v in sorted(os.listdir(bt), reverse=True):
                 p = os.path.join(bt, v, "zipalign")
-                if os.path.isfile(p): return p
+                if os.path.isfile(p):
+                    return p
     return shutil.which("zipalign")
 
 def find_apksig_jar():
@@ -33,7 +48,8 @@ def find_apksig_jar():
                 candidates.append(os.path.join(bt, v, "lib", "apksigner.jar"))
     candidates.append("/data/data/com.termux/files/usr/share/java/apksigner.jar")
     for c in candidates:
-        if os.path.isfile(c): return c
+        if os.path.isfile(c):
+            return c
     return None
 
 def ensure_keys():
@@ -49,7 +65,12 @@ def ensure_keys():
         run(["openssl", "x509", "-in", cert_pem, "-outform", "DER", "-out", cert_der])
         run(["openssl", "pkcs8", "-topk8", "-nocrypt", "-in", key,
              "-outform", "DER", "-out", pk8])
-    return key, pk8, cert_der
+    pub_pem = os.path.join(KEY_DIR, "v2_pub.pem")
+    pub_der = os.path.join(KEY_DIR, "v2_pub.der")
+    if not (os.path.isfile(pub_pem) and os.path.isfile(pub_der)):
+        run(["openssl", "x509", "-in", cert_pem, "-pubkey", "-noout", "-out", pub_pem])
+        run(["openssl", "pkey", "-pubin", "-outform", "DER", "-in", pub_pem, "-out", pub_der])
+    return key, pk8, cert_der, pub_der
 
 # ---------- ZIP 字节级工具（保留原压缩字节，供数据复用） ----------
 
@@ -58,7 +79,6 @@ def _find_eocd(data):
         if data[i:i + 4] == b"PK\x05\x06":
             return i
     return -1
-
 
 def _parse_central(data, cd_off, cd_size):
     entries = []
@@ -87,12 +107,10 @@ def _parse_central(data, cd_off, cd_size):
         off += 46 + nl + el + cl
     return entries
 
-
 def _local_len(data, lho):
     nl = struct.unpack_from("<H", data, lho + 26)[0]
     el = struct.unpack_from("<H", data, lho + 28)[0]
     return 30 + nl + el
-
 
 def _make_local(name_b, method, flags, crc, comp, uncomp):
     lh = bytearray(30 + len(name_b))
@@ -107,7 +125,6 @@ def _make_local(name_b, method, flags, crc, comp, uncomp):
     struct.pack_into("<H", lh, 28, 0)
     lh[30:30 + len(name_b)] = name_b
     return bytes(lh)
-
 
 def _make_central(name_b, method, flags, crc, comp, uncomp, offset):
     ce = bytearray(46 + len(name_b))
@@ -124,7 +141,6 @@ def _make_central(name_b, method, flags, crc, comp, uncomp, offset):
     ce[46:] = name_b
     return bytes(ce)
 
-
 def _make_eocd(cd_off, cd_size, total):
     e = bytearray(22)
     e[0:4] = b"PK\x05\x06"
@@ -133,7 +149,6 @@ def _make_eocd(cd_off, cd_size, total):
     struct.pack_into("<I", e, 12, cd_size)
     struct.pack_into("<I", e, 16, cd_off)
     return bytes(e)
-
 
 def inject_v1(input_apk, orig_apk):
     """字节保留式注入原版 V1 三件套：不重新压缩任何 entry，
@@ -191,6 +206,30 @@ def inject_v1(input_apk, orig_apk):
         f.write(out)
     print("[ok] V1 trio injected (byte-preserving):", list(trio.keys()))
 
+def verify_zip_entries(path, label):
+    """逐 entry 验证 ZIP 可读，返回 (total, bad_list)。"""
+    bad = []
+    total = 0
+    try:
+        zf = zipfile.ZipFile(path)
+    except Exception as e:
+        return 0, [("<zip-open>", -1, repr(e))]
+    with zf:
+        for info in zf.infolist():
+            total += 1
+            try:
+                if not info.is_dir():
+                    zf.read(info)
+            except Exception as e:
+                bad.append((info.filename, info.header_offset, repr(e)))
+    if bad:
+        print("[FAIL] %s: %d bad entries of %d" % (label, len(bad), total), flush=True)
+        for name, off, err in bad[:20]:
+            print("   bad entry %s (offset=%d): %s" % (name, off, err), flush=True)
+    else:
+        print("[ok] %s: all %d entries readable" % (label, total), flush=True)
+    return total, bad
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
@@ -212,9 +251,8 @@ def main():
     aligned = a.input + ".aligned"
     run([zipalign, "-f", "4", a.input, aligned])
 
-    key, pk8, cert_der = ensure_keys()
+    key, pk8, cert_der, pub_der = ensure_keys()
 
-    # compile KeepV1Signer
     src_dir = os.path.dirname(os.path.abspath(__file__))
     classes_dir = os.path.join(KEY_DIR, "classes")
     os.makedirs(classes_dir, exist_ok=True)
@@ -226,38 +264,47 @@ def main():
     print("[ok] apksig V2 signed (V1 preserved)")
 
     if a.multiplex:
-        # MT 式数据复用优化：相同文件共享 assets/SignedByRS/input.apk 数据段
+        # 1) MT 式数据复用
         opt = a.output + ".opt"
-        run(["python3", os.path.join(src_dir, "data_multiplexing.py"),
-             "--input", a.output, "--output", opt])
-        pub_pem = os.path.join(KEY_DIR, "v2_pub.pem")
-        pub_der = os.path.join(KEY_DIR, "v2_pub.der")
-        run(["openssl", "x509", "-in", os.path.join(KEY_DIR, "v2_cert.pem"),
-             "-pubkey", "-noout", "-out", pub_pem])
-        run(["openssl", "pkey", "-pubin", "-outform", "DER",
-             "-in", pub_pem, "-out", pub_der])
+        r = subprocess.run(
+            ["python3", os.path.join(src_dir, "data_multiplexing.py"),
+             "--input", a.output, "--output", opt],
+            capture_output=True, text=True)
+        if r.stdout: print(r.stdout, end="", flush=True)
+        if r.stderr: print(r.stderr, end="", flush=True)
+        if r.returncode != 0:
+            shutil.copy2(opt, opt + ".debug") if os.path.exists(opt) else None
+            raise SystemExit("data_multiplexing failed")
+
+        # 2) 复用产物自检（不重排 V2 重签前）
+        verify_zip_entries(opt, "opt (multiplexed)")
+
+        # 3) 不重排 V2 重签
         v2_out = a.output + ".v2tmp"
-        run(["python3", os.path.join(src_dir, "v2_sign.py"),
+        r = subprocess.run(
+            ["python3", os.path.join(src_dir, "v2_sign.py"),
              "--input", opt, "--output", v2_out,
-             "--key", key, "--cert", cert_der, "--pub", pub_der])
-        # 自检：仅验证 ZIP 结构 + 关键 entry 可读（不用 apksigner verify，V1 壳会误报）
-        try:
-            import zipfile
-            with zipfile.ZipFile(v2_out) as zf:
-                names = set(zf.namelist())
-                for probe in ("AndroidManifest.xml", "classes.dex", "assets/SignedByRS/input.apk"):
-                    if probe in names:
-                        if not zf.read(zf.getinfo(probe)):
-                            raise SystemExit("empty entry: " + probe)
-        except SystemExit:
-            raise
-        except Exception as e:
-            print("[warn] V2 resign self-check failed: %r" % (e,))
+             "--key", key, "--cert", cert_der, "--pub", pub_der],
+            capture_output=True, text=True)
+        if r.stdout: print(r.stdout, end="", flush=True)
+        if r.stderr: print(r.stderr, end="", flush=True)
+        if r.returncode != 0:
+            shutil.copy2(opt, opt + ".debug") if os.path.exists(opt) else None
+            shutil.copy2(v2_out, v2_out + ".debug") if os.path.exists(v2_out) else None
+            raise SystemExit("v2_sign failed")
+
+        # 4) 产物逐 entry 自检
+        _, bad = verify_zip_entries(v2_out, "v2tmp (re-signed)")
+        if bad:
+            shutil.copy2(opt, opt + ".debug")
+            shutil.copy2(v2_out, v2_out + ".debug")
+            print("[debug] 已保留 %s 与 %s 供排查" % (opt + ".debug", v2_out + ".debug"), flush=True)
             raise SystemExit("v2 resign output invalid")
+
         os.replace(v2_out, a.output)
         print("[ok] data multiplexing + V2 re-sign done")
-    print("[ok] final signed (V2 valid, V1 preserved)")
 
+    print("[ok] final signed (V2 valid, V1 preserved)")
 
 if __name__ == "__main__":
     main()

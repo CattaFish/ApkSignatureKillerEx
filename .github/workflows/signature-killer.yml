@@ -148,6 +148,9 @@ jobs:
           path: |
             signature-killer/work_out/pipeline.log
             signature-killer/work_out/decoded/AndroidManifest.xml
+            signature-killer/work_out/*.debug
+            signature-killer/work_out/*.opt
+            signature-killer/work_out/*.v2tmp
           retention-days: 7
           if-no-files-found: ignore
 

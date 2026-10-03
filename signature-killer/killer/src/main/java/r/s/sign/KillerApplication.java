@@ -389,7 +389,12 @@ public class KillerApplication extends Application {
         return false;
     }
 
-    public static void onLoaded() {
+    private static final java.util.concurrent.atomic.AtomicBoolean sOnLoadedDone = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    public static void onLoaded(Context context) {
+        if (!sOnLoadedDone.compareAndSet(false, true)) {
+            return;
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 HiddenApiBypass.addHiddenApiExemptions("L");
@@ -398,57 +403,66 @@ public class KillerApplication extends Application {
             java.lang.reflect.Method cm = atClass.getDeclaredMethod("currentActivityThread");
             cm.setAccessible(true);
             Object at = cm.invoke(null);
-            if (at == null) return;
-            Object bound = findField(atClass, "mBoundApplication").get(at);
-            if (bound == null) return;
-            Object loadedApk = findField(bound.getClass(), "info").get(bound);
-            if (loadedApk == null) return;
-            ApplicationInfo ai = null;
-            try {
-                Object o = findField(loadedApk.getClass(), "mApplicationInfo").get(loadedApk);
-                if (o instanceof ApplicationInfo) ai = (ApplicationInfo) o;
-            } catch (Throwable ignored) {}
-            if (ai == null || ai.packageName == null) return;
 
-            String packageName = ai.packageName;
-            String baseApk = null;
-            try {
-                Object o = findField(loadedApk.getClass(), "mResDir").get(loadedApk);
-                if (o instanceof String) baseApk = (String) o;
-            } catch (Throwable ignored) {}
+            Context appCtx = context;
+            String packageName = (appCtx != null) ? appCtx.getPackageName() : null;
+            String baseApk = (appCtx != null) ? appCtx.getPackageResourcePath() : null;
+
+            if (at != null) {
+                try {
+                    Object bound = findField(atClass, "mBoundApplication").get(at);
+                    if (bound != null) {
+                        Object loadedApk = findField(bound.getClass(), "info").get(bound);
+                        if (loadedApk != null) {
+                            if (packageName == null) {
+                                Object o = findField(loadedApk.getClass(), "mApplicationInfo").get(loadedApk);
+                                if (o instanceof ApplicationInfo) packageName = ((ApplicationInfo) o).packageName;
+                            }
+                            if (baseApk == null) {
+                                Object o = findField(loadedApk.getClass(), "mResDir").get(loadedApk);
+                                if (o instanceof String) baseApk = (String) o;
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            if (packageName == null && appCtx != null) packageName = appCtx.getPackageName();
+            if (packageName == null) return;
+            if (baseApk == null && appCtx != null) baseApk = appCtx.getPackageResourcePath();
             if (baseApk == null) return;
 
-            // 期望证书直接从自身 base.apk 的 META-INF/*.RSA 读取（finalize_sign 已置入原证书）
-            // 不再解包 signed.apk，避免大包 Application 启动卡死
             sBaseApkPath = baseApk;
             byte[] sig = readSignatureFromApk(new File(baseApk));
-            if (sig == null) {
-                sPmExpectedCert = null;
-            } else {
+            if (sig != null) {
                 sPmExpectedCert = sig;
                 cacheOriginalSignature(packageName, sig);
                 try { killPM(packageName); } catch (Throwable t) { Log.w(TAG, "onLoaded: killPM failed", t); }
             }
-            Context appCtx = null;
-            try {
-                Object all = findField(atClass, "mAllApplications").get(at);
-                if (all instanceof java.util.List) {
-                    for (Object appObj : (java.util.List<?>) all) {
-                        if (appObj instanceof Application) {
-                            appCtx = (Application) appObj;
-                            break;
+
+            // 优先使用传入的 Context，未传时兜底反射
+            if (appCtx == null && at != null) {
+                try {
+                    Object all = findField(atClass, "mAllApplications").get(at);
+                    if (all instanceof java.util.List) {
+                        for (Object appObj : (java.util.List<?>) all) {
+                            if (appObj instanceof Application) {
+                                appCtx = (Application) appObj;
+                                break;
+                            }
                         }
                     }
-                }
-            } catch (Throwable ignored) {}
-            if (appCtx == null) {
-                try {
-                    java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
-                    gm.setAccessible(true);
-                    Object o = gm.invoke(at);
-                    if (o instanceof Context) appCtx = (Context) o;
                 } catch (Throwable ignored) {}
+                if (appCtx == null) {
+                    try {
+                        java.lang.reflect.Method gm = atClass.getMethod("getSystemContext");
+                        gm.setAccessible(true);
+                        Object o = gm.invoke(at);
+                        if (o instanceof Context) appCtx = (Context) o;
+                    } catch (Throwable ignored) {}
+                }
             }
+
             if (appCtx != null) {
                 installPmProxy(appCtx, packageName);
                 try {
@@ -456,31 +470,17 @@ public class KillerApplication extends Application {
                     if (rep != null) {
                         sRedirectApkPath = rep;
                         try {
-                            byte[] originSig = readSignatureFromApk(new File(rep));
-                            if (originSig != null
-                                    && (sPmExpectedCert == null
-                                        || !java.security.MessageDigest.isEqual(sPmExpectedCert, originSig))) {
-                                Log.w(TAG, "onLoaded: refresh signature from signed.apk (external resign?)");
-                                sPmExpectedCert = originSig;
-                                cacheOriginalSignature(packageName, originSig);
-                                killPM(packageName);
-                            }
-                        } catch (Throwable t) {
-                            Log.w(TAG, "onLoaded: refresh signature failed", t);
-                        }
-                        try {
                             redirectApkPaths(appCtx);
                             Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + rep);
                         } catch (Throwable t2) {
                             Log.w(TAG, "onLoaded: redirectApkPaths failed", t2);
                         }
-                    } else {
-                        Log.w(TAG, "onLoaded: prepare returned null (assets/SignedByRS/input.apk 缺失?)");
                     }
                 } catch (Throwable t) {
                     Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                 }
             }
+
             try {
                 killOpen(packageName);
                 Log.w(TAG, "onLoaded: killOpen done");
@@ -491,6 +491,10 @@ public class KillerApplication extends Application {
         } catch (Throwable t) {
             Log.w(TAG, "onLoaded failed", t);
         }
+    }
+
+    public static void onLoaded() {
+        onLoaded(null);
     }
 
 

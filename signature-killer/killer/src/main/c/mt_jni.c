@@ -189,6 +189,26 @@ Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused))
     (*env)->ReleaseStringUTFChars(env, apkPath, apk_path);
     (*env)->ReleaseStringUTFChars(env, repPath, rep_path);
 
+    /* =========================================================================
+     * 核心保护白名单（必须在 xhook_register 之前配置）：
+     * 1. 严禁 Hook /vendor/ 和 /odm/ 的所有函数，防止高通/联发科私有驱动加载失败。
+     * 2. 严禁 Hook 系统级 /system/ 与 /apex/ 的 dlopen，防止 Linker 命名空间漂移。
+     * 3. 严禁 Hook 图形与 UI 核心渲染库，保证 RenderThread 不丢帧缓冲。
+     * ========================================================================= */
+    xhook_ignore(".*/vendor/.*", NULL);
+    xhook_ignore(".*/odm/.*", NULL);
+    xhook_ignore(".*/system/.*", "dlopen");
+    xhook_ignore(".*/system/.*", "android_dlopen_ext");
+    xhook_ignore(".*/apex/.*", "dlopen");
+    xhook_ignore(".*/apex/.*", "android_dlopen_ext");
+    xhook_ignore(".*/libEGL.*\\.so$", NULL);
+    xhook_ignore(".*/libGLES.*\\.so$", NULL);
+    xhook_ignore(".*/libgui\\.so$", NULL);
+    xhook_ignore(".*/libui\\.so$", NULL);
+    xhook_ignore(".*/libhwui\\.so$", NULL);
+    xhook_ignore(".*/libandroid_runtime\\.so$", "dlopen");
+    xhook_ignore(".*/libandroid_runtime\\.so$", "android_dlopen_ext");
+
     xhook_register(".*\\.so$", "openat64", openat64Impl, (void **) &old_openat64);
     xhook_register(".*\\.so$", "dlopen", dlopenImpl, (void **) &old_dlopen);
     xhook_register(".*\\.so$", "android_dlopen_ext", android_dlopen_extImpl, (void **) &old_android_dlopen_ext);

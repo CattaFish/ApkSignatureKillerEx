@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MT 式数据复用优化（诊断版）。
-
-把产物 APK 中与 assets/Zcraft/input.apk（原包）完全相同
-（文件名/压缩方式/CRC/压缩大小一致）的文件，在中央目录里把数据偏移
-直接指向原包内部对应数据段，并删除产物中重复的数据段。
-
-先有完整签名产物（V2 有效、V1 壳），再对本文件输出做一次
-不重排 V2 重签（v2_sign.py），否则优化会失效。
-"""
-
 import argparse
 import struct
 import sys
 import zlib
-
-INPUT_APK = "assets/Zcraft/input.apk"
-
 
 def find_eocd(data):
     for i in range(len(data) - 22, max(0, len(data) - 65557) - 1, -1):
         if data[i:i + 4] == b"PK\x05\x06":
             return i
     return -1
-
 
 def parse_entries(data, cd_offset, cd_size):
     entries = []
@@ -57,7 +43,6 @@ def parse_entries(data, cd_offset, cd_size):
         off += 46 + name_len + extra_len + comment_len
     return entries
 
-
 def read_entry_data(data, e):
     lho = e["local_offset"]
     if lho < 0 or lho + 4 > len(data):
@@ -72,6 +57,13 @@ def read_entry_data(data, e):
         return None
     return data[start:end]
 
+def is_origin_apk_payload(data, e):
+    if e["uncomp_size"] < 500 * 1024 or e["method"] != 0:
+        return False
+    comp = read_entry_data(data, e)
+    if not comp or len(comp) < 30:
+        return False
+    return comp[:4] == b"PK\x03\x04" and b"AndroidManifest.xml" in comp
 
 def build_local(name_bytes, method, crc, comp_size, uncomp_size,
                 start_offset, align_data, flags=0):
@@ -94,7 +86,6 @@ def build_local(name_bytes, method, crc, comp_size, uncomp_size,
     lh[30:30 + name_len] = name_bytes
     return bytes(lh)
 
-
 def central_from_old(data, e, new_offset, clear_bit3=True):
     ce = bytearray(data[e["central_offset"]:e["central_offset"] + e["central_len"]])
     struct.pack_into("<I", ce, 42, new_offset)
@@ -103,7 +94,6 @@ def central_from_old(data, e, new_offset, clear_bit3=True):
         flags &= ~0x0008
         struct.pack_into("<H", ce, 8, flags)
     return bytes(ce)
-
 
 def build_central(name_bytes, method, crc, comp_size, uncomp_size, offset):
     name_len = len(name_bytes)
@@ -121,7 +111,6 @@ def build_central(name_bytes, method, crc, comp_size, uncomp_size, offset):
     ce[46:46 + name_len] = name_bytes
     return bytes(ce)
 
-
 def build_eocd(cd_offset, cd_size, total):
     eocd = bytearray(22)
     eocd[0:4] = b"PK\x05\x06"
@@ -130,7 +119,6 @@ def build_eocd(cd_offset, cd_size, total):
     struct.pack_into("<I", eocd, 12, cd_size)
     struct.pack_into("<I", eocd, 16, cd_offset)
     return bytes(eocd)
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -150,11 +138,21 @@ def main():
 
     inner_e = None
     for e in entries:
-        if e["name_str"] == INPUT_APK:
+        if e["name_str"].startswith("assets/") and is_origin_apk_payload(data, e):
             inner_e = e
             break
+
     if inner_e is None:
-        sys.exit("missing " + INPUT_APK)
+        for e in entries:
+            if e["name_str"] == "assets/Zcraft/input.apk":
+                inner_e = e
+                break
+
+    if inner_e is None:
+        sys.exit("bad apk: 未能在 assets/ 下找到内嵌的原包条目")
+
+    input_apk_name = inner_e["name_str"]
+    print(f"[info] 自动匹配内嵌原包条目: {input_apk_name}")
 
     inner_comp = read_entry_data(data, inner_e)
     if inner_comp is None:
@@ -165,7 +163,6 @@ def main():
         inner_data = zlib.decompress(inner_comp, -15)
     else:
         sys.exit("unsupported inner method %d" % inner_e["method"])
-    print("[info] inner apk size=%d (was method %d)" % (len(inner_data), inner_e["method"]))
 
     ieocd = find_eocd(inner_data)
     if ieocd < 0:
@@ -173,16 +170,12 @@ def main():
     icd_offset = struct.unpack_from("<I", inner_data, ieocd + 16)[0]
     icd_size = struct.unpack_from("<I", inner_data, ieocd + 12)[0]
     inner_entries = parse_entries(inner_data, icd_offset, icd_size)
-    inner_map = {}
-    for ie in inner_entries:
-        if ie["name_str"] not in inner_map:
-            inner_map[ie["name_str"]] = ie
-    print("[info] outer=%d entries, inner=%d entries" % (len(entries), len(inner_entries)))
+    inner_map = {ie["name_str"]: ie for ie in inner_entries}
 
     stats = {"same_name": 0, "method_diff": 0, "size_crc_diff": 0, "byte_diff": 0, "bit3": 0}
     reused = set()
     for e in entries:
-        if e["name_str"] == INPUT_APK or e["name_str"].endswith("/"):
+        if e["name_str"] == input_apk_name or e["name_str"].endswith("/"):
             continue
         ie = inner_map.get(e["name_str"])
         if ie is None:
@@ -204,31 +197,24 @@ def main():
 
     print("[info] match stats: %s" % (stats,))
     print("[ok] reused entries: %d / %d" % (len(reused), len(entries) - 1))
-    if len(reused) == 0:
-        print("[warn] 没有任何可复用文件，优化未生效（产物仍是完整副本，但可安装）")
 
     out = bytearray()
     centrals = []
 
-    # 1) 先写原包数据段（STORE，data 4 字节对齐，供复用指向）
     inner_lh = build_local(inner_e["name"], 0, inner_e["crc"],
                            len(inner_data), len(inner_data), len(out), True)
-    inner_lh_offset = len(out)            # input.apk local header 起点（central 里 offset 指向这里）
-    inner_data_start = len(out) + len(inner_lh)   # ★ 数据段起点：复用条目以此基准 + 原包内偏移
+    inner_lh_offset = len(out)
+    inner_data_start = len(out) + len(inner_lh)
     out += inner_lh + inner_data
     centrals.append(build_central(inner_e["name"], 0, inner_e["crc"],
                                   len(inner_data), len(inner_data), inner_lh_offset))
 
-    # 2) 其余 entry
     for e in entries:
-        if e["name_str"] == INPUT_APK:
+        if e["name_str"] == input_apk_name:
             continue
         if e["name_str"] in reused:
             ie = inner_map[e["name_str"]]
-            # ★ 目标 = 外层 input.apk 数据段起点 + 原包内该文件的 local header 偏移
-            #   （input.apk 数据段 = 原包完整字节，含原包各 local header）
             target = inner_data_start + ie["local_offset"]
-            # 复制外层 central 记录（保留 apksig 后的对齐 extra 等），只改 offset 并清 bit3
             centrals.append(central_from_old(data, e, target, clear_bit3=True))
             continue
         comp = read_entry_data(data, e)
@@ -250,7 +236,6 @@ def main():
         f.write(out)
     print("[ok] multiplex: %d -> %d bytes (-%d%%)" % (
         len(data), len(out), (1 - len(out) / max(1, len(data))) * 100))
-
 
 if __name__ == "__main__":
     main()

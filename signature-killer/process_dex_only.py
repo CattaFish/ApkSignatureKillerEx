@@ -258,7 +258,7 @@ def build_unsigned(orig, out, replaced=None, additions=None):
     with open(out, "wb") as f:
         f.write(out_buf)
     print(f"[ok] unsigned built: {len(out_buf)} bytes ({len(centrals)} entries), "
-          f"input_apk={'assets/Zcraft/input.apk' in seen}")
+          f"input_apk={any(k.startswith('assets/') and k.endswith('.apk') for k in seen)}")
 
 
 def main():
@@ -312,8 +312,12 @@ def main():
         print("FAIL: 没有注入 libZcraft.so（先运行 prepare 生成 work_killer/lib）")
         sys.exit(1)
 
-    additions["assets/Zcraft/input.apk"] = open(a.apk, "rb").read()
-    print("[ok] assets/Zcraft/input.apk <- 输入 APK（STORE，供数据复用引用）")
+        import random, string
+    r_dir = "".join(random.choices(string.ascii_lowercase + string.digits, k=7))
+    r_file = "".join(random.choices(string.ascii_lowercase + string.digits, k=9)) + ".apk"
+    rand_entry = f"assets/{r_dir}/{r_file}"
+    additions[rand_entry] = open(a.apk, "rb").read()
+    print(f"[ok] {rand_entry} <- 输入 APK（全随机混淆名称，STORE供数据复用）"))
 
     killer_dex_src = os.path.join(THIS_DIR, "work_killer", "classes.dex")
     if not os.path.isfile(killer_dex_src):

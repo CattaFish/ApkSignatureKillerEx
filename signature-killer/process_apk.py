@@ -257,10 +257,13 @@ def main():
     package = m.group(1)
     print(f"[info] package = {package}")
 
-    asset_dir = os.path.join(DECODED, "assets", "Zcraft")
+        import random, string
+    r_dir = "".join(random.choices(string.ascii_lowercase + string.digits, k=7))
+    r_file = "".join(random.choices(string.ascii_lowercase + string.digits, k=9)) + ".apk"
+    asset_dir = os.path.join(DECODED, "assets", r_dir)
     os.makedirs(asset_dir, exist_ok=True)
-    shutil.copy(apk_path, os.path.join(asset_dir, "input.apk"))
-    print("[ok] assets/Zcraft/input.apk <- 输入 APK 自身")
+    shutil.copy(apk_path, os.path.join(asset_dir, r_file))
+    print(f"[ok] assets/{r_dir}/{r_file} <- 输入 APK 自身 (全随机混淆名称)"))
 
     injected = 0
     for abi in ABIS:

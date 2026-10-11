@@ -20,6 +20,12 @@
 #include "sigbypass_core.h"
 #include <dlfcn.h>
 
+/* ===== 行为特征开关（默认全关，代码保留）===== */
+#define SIGB_ENABLE_MAPS_SANITIZE     0
+#define SIGB_ENABLE_DLOPEN_REFRESH    0
+#define SIGB_ENABLE_DL_ITERATE_FILTER 0
+
+
 /* ================= Step 4: path family ================= */
 static int (*old_access)(const char *, int);
 static ssize_t (*old_readlink)(const char *, char *, size_t);
@@ -66,9 +72,11 @@ static void sigb_refresh_after_load(void) {
 
 static void *dlopenImpl(const char *filename, int flags) {
     void *h = old_dlopen != NULL ? old_dlopen(filename, flags) : dlopen(filename, flags);
+#if SIGB_ENABLE_DLOPEN_REFRESH
     if (h != NULL) {
         sigb_refresh_after_load();
     }
+#endif
     return h;
 }
 
@@ -86,9 +94,11 @@ static void *android_dlopen_extImpl(const char *filename, int flags, const void 
     } else {
         h = dlopen(filename, flags);
     }
+#if SIGB_ENABLE_DLOPEN_REFRESH
     if (h != NULL) {
         sigb_refresh_after_load();
     }
+#endif
     return h;
 }
 
@@ -204,8 +214,10 @@ Java_xkl_yfl_a_hookApkPath(JNIEnv *env, __attribute__((unused)) jclass clazz, js
     xhook_ignore(".*/libandroid_runtime\\.so$", "android_dlopen_ext");
 
     xhook_register(".*\\.so$", "openat64", openat64Impl, (void **) &old_openat64);
+#if SIGB_ENABLE_DLOPEN_REFRESH
     xhook_register(".*\\.so$", "dlopen", dlopenImpl, (void **) &old_dlopen);
     xhook_register(".*\\.so$", "android_dlopen_ext", android_dlopen_extImpl, (void **) &old_android_dlopen_ext);
+#endif
     xhook_register(".*\\.so$", "openat", openatImpl, (void **) &old_openat);
     xhook_register(".*\\.so$", "open64", open64Impl, (void **) &old_open64);
     xhook_register(".*\\.so$", "open", openImpl, (void **) &old_open);
@@ -223,7 +235,9 @@ Java_xkl_yfl_a_hookApkPath(JNIEnv *env, __attribute__((unused)) jclass clazz, js
     xhook_register(".*\\.so$", "statx", statxImpl, (void **) &old_statx);
     xhook_register(".*\\.so$", "fopen", fopenImpl, (void **) &old_fopen);
     xhook_register(".*\\.so$", "__open_2", __open_2Impl, (void **) &old___open_2);
+#if SIGB_ENABLE_DL_ITERATE_FILTER
     xhook_register(".*\\.so$", "dl_iterate_phdr", dlIteratePhdrImpl, (void **) &old_dl_iterate_phdr);
+#endif
     sigb_set_state(SIGB_STATE_REENTRY);
     xhook_refresh(0);
     sigb_set_state(SIGB_STATE_NORMAL);
@@ -333,6 +347,9 @@ static int __open_2Impl(const char *pathname, int flags) {
 
 static int serve_sanitized_proc(const char *pathname) {
     if (pathname == NULL) return -1;
+#if !SIGB_ENABLE_MAPS_SANITIZE
+    return -1;
+#endif
     if (!sigb_should_sanitize_proc(pathname)) return -1;
     if (!sigb_is_normal()) return -1;
 
@@ -370,6 +387,9 @@ static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void
         errno = ENOSYS;
         return 0;
     }
+#if !SIGB_ENABLE_DL_ITERATE_FILTER
+    return old_dl_iterate_phdr(callback, data);
+#endif
     if (!sigb_is_normal() || callback == NULL) {
         if (old_dl_iterate_phdr == NULL) { errno = ENOSYS; return 0; }
         return old_dl_iterate_phdr(callback, data);

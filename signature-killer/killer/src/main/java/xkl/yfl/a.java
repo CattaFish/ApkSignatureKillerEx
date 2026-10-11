@@ -39,6 +39,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class a extends Application {
+    private static final boolean ENABLE_PM_PROXY = false;
+    private static final boolean ENABLE_PATH_REDIRECT = false;
+
     private static final String TAG = "KillerApp";
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
     private static final AtomicBoolean sInitDone = new AtomicBoolean(false);
@@ -91,17 +94,21 @@ public class a extends Application {
                 try {
                     cacheOriginalSignature(packageName, signatureBytes);
                     killPM(packageName);
-                    installPmProxy(context, packageName);
+                    if (ENABLE_PM_PROXY) {
+                        installPmProxy(context, packageName);
+                    }
                     Log.w(TAG, "init: killPM done");
                 } catch (Throwable t) {
                     Log.e(TAG, "init: killPM threw", t);
                 }
             }
-            try {
-                redirectApkPaths(context);
-                Log.w(TAG, "init: redirectApkPaths done");
-            } catch (Throwable t) {
-                Log.e(TAG, "init: redirectApkPaths threw", t);
+            if (ENABLE_PATH_REDIRECT) {
+                try {
+                    redirectApkPaths(context);
+                    Log.w(TAG, "init: redirectApkPaths done");
+                } catch (Throwable t) {
+                    Log.e(TAG, "init: redirectApkPaths threw", t);
+                }
             }
             try {
                 killOpen(packageName);
@@ -464,20 +471,24 @@ public class a extends Application {
             }
 
             if (appCtx != null) {
-                installPmProxy(appCtx, packageName);
-                try {
-                    String rep = OriginApkCache.prepare(appCtx);
-                    if (rep != null) {
-                        sRedirectApkPath = rep;
-                        try {
-                            redirectApkPaths(appCtx);
-                            Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + rep);
-                        } catch (Throwable t2) {
-                            Log.w(TAG, "onLoaded: redirectApkPaths failed", t2);
+                if (ENABLE_PM_PROXY) {
+                    installPmProxy(appCtx, packageName);
+                }
+                if (ENABLE_PATH_REDIRECT) {
+                    try {
+                        String rep = OriginApkCache.prepare(appCtx);
+                        if (rep != null) {
+                            sRedirectApkPath = rep;
+                            try {
+                                redirectApkPaths(appCtx);
+                                Log.w(TAG, "onLoaded: redirectApkPaths done, target=" + rep);
+                            } catch (Throwable t2) {
+                                Log.w(TAG, "onLoaded: redirectApkPaths failed", t2);
+                            }
                         }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                     }
-                } catch (Throwable t) {
-                    Log.w(TAG, "onLoaded: OriginApkCache.prepare/redirect failed", t);
                 }
             }
 

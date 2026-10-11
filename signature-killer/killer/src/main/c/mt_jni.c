@@ -180,7 +180,7 @@ static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
 }
 
 JNIEXPORT void JNICALL
-Java_r_s_sign_KillerApplication_hookApkPath(JNIEnv *env, __attribute__((unused)) jclass clazz, jstring apkPath, jstring repPath) {
+Java_xkl_yfl_a_hookApkPath(JNIEnv *env, __attribute__((unused)) jclass clazz, jstring apkPath, jstring repPath) {
     const char *apk_path = (*env)->GetStringUTFChars(env, apkPath, 0);
     const char *rep_path = (*env)->GetStringUTFChars(env, repPath, 0);
     sigb_set_target_paths(apk_path, rep_path);
@@ -355,11 +355,11 @@ static int serve_sanitized_proc(const char *pathname) {
     free(content);
     if (clean == NULL) return -1;
 
-    int memfd = sigb_create_memfd("npatch_proc_view", clean, strlen(clean));
+    int memfd = sigb_create_memfd("vvdf", clean, strlen(clean));
     free(clean);
     if (memfd < 0) return -1;
 
-    XH_LOG_WARN("SANITIZED %s -> memfd:npatch_proc_view", pathname);
+    XH_LOG_WARN("SANITIZED %s -> memfd:vvdf", pathname);
     return memfd;
 }
 
@@ -412,7 +412,7 @@ static int probe_dlcallback(struct dl_phdr_info *info, size_t size, void *data) 
 }
 
 JNIEXPORT void JNICALL
-Java_r_s_sign_KillerApplication_refreshHooks(JNIEnv *env, jclass clazz) {
+Java_xkl_yfl_a_refreshHooks(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     sigb_set_state(SIGB_STATE_REENTRY);
     xhook_refresh(0);
@@ -420,7 +420,7 @@ Java_r_s_sign_KillerApplication_refreshHooks(JNIEnv *env, jclass clazz) {
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_r_s_sign_KillerApplication_probeFopen(JNIEnv *env, jclass clazz, jstring jpath) {
+Java_xkl_yfl_a_probeFopen(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
     if (jpath == NULL) return NULL;
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
@@ -452,7 +452,7 @@ Java_r_s_sign_KillerApplication_probeFopen(JNIEnv *env, jclass clazz, jstring jp
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpath) {
+Java_xkl_yfl_a_probeStat(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
     if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
@@ -489,7 +489,7 @@ Java_r_s_sign_KillerApplication_probeStat(JNIEnv *env, jclass clazz, jstring jpa
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probePaths(JNIEnv *env, jclass clazz, jstring jpath) {
+Java_xkl_yfl_a_probePaths(JNIEnv *env, jclass clazz, jstring jpath) {
     (void)clazz;
     if (jpath == NULL) return (*env)->NewStringUTF(env, "ERR:null");
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
@@ -509,7 +509,7 @@ Java_r_s_sign_KillerApplication_probePaths(JNIEnv *env, jclass clazz, jstring jp
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean raw) {
+Java_xkl_yfl_a_probeMaps(JNIEnv *env, jclass clazz, jboolean raw) {
     (void)clazz;
     const char *path = "/proc/self/maps";
     char *content = NULL;
@@ -535,7 +535,7 @@ Java_r_s_sign_KillerApplication_probeMaps(JNIEnv *env, jclass clazz, jboolean ra
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
+Java_xkl_yfl_a_probeFds(JNIEnv *env, jclass clazz) {
     (void)clazz;
     char fd_path[64];
     size_t used = 0;
@@ -553,7 +553,7 @@ Java_r_s_sign_KillerApplication_probeFds(JNIEnv *env, jclass clazz) {
 }
 
 JNIEXPORT jstring JNICALL
-Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz, jboolean raw) {
+Java_xkl_yfl_a_probeDlIterate(JNIEnv *env, jclass clazz, jboolean raw) {
     (void)clazz;
     size_t used = 0;
     probe_dl_out[0] = '\0';
@@ -568,13 +568,13 @@ Java_r_s_sign_KillerApplication_probeDlIterate(JNIEnv *env, jclass clazz, jboole
 }
 
 JNIEXPORT void JNICALL
-Java_r_s_sign_KillerApplication_setThreadBypass(JNIEnv *env, jclass clazz, jboolean bypass) {
+Java_xkl_yfl_a_setThreadBypass(JNIEnv *env, jclass clazz, jboolean bypass) {
     (void)env; (void)clazz;
     sigb_set_thread_bypass(bypass == JNI_TRUE ? 1 : 0);
 }
 
 JNIEXPORT jboolean JNICALL
-Java_r_s_sign_KillerApplication_isThreadBypass(JNIEnv *env, jclass clazz) {
+Java_xkl_yfl_a_isThreadBypass(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     return sigb_is_thread_bypass() ? JNI_TRUE : JNI_FALSE;
 }

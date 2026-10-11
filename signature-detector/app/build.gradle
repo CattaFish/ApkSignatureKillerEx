@@ -8,7 +8,7 @@ android {
     ndkVersion '27.0.11902837'
 
     defaultConfig {
-        applicationId "r.s.sign"
+        applicationId "xkl.yfl"
         minSdk 21
         //noinspection ExpiredTargetSdkVersion,OldTargetApi
         targetSdk 32

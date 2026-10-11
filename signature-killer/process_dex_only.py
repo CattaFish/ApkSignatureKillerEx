@@ -54,7 +54,7 @@ def get_activity(apk, apktool):
 
 def patch_clinit(smali_path):
     s = open(smali_path, encoding="utf-8").read()
-    marker = "invoke-static {}, Lr/s/sign/KillerApplication;->onLoaded()V"
+    marker = "invoke-static {}, Lxkl/yfl/a;->onLoaded()V"
     if marker in s:
         return False
     pat = re.compile(r'(\.method static constructor <clinit>\(\)V\n(?:\s*\.registers \d+\n)?)')
@@ -303,13 +303,13 @@ def main():
 
     injected_so = 0
     for abi in ABIS:
-        src = os.path.join(THIS_DIR, KILLER_LIB, abi, "libZcraft.so")
+        src = os.path.join(THIS_DIR, KILLER_LIB, abi, "libcst.so")
         if os.path.isfile(src):
-            additions[f"lib/{abi}/libZcraft.so"] = open(src, "rb").read()
+            additions[f"lib/{abi}/libcst.so"] = open(src, "rb").read()
             injected_so += 1
-            print(f"[ok] lib/{abi}/libZcraft.so")
+            print(f"[ok] lib/{abi}/libcst.so")
     if injected_so == 0:
-        print("FAIL: 没有注入 libZcraft.so（先运行 prepare 生成 work_killer/lib）")
+        print("FAIL: 没有注入 libcst.so（先运行 prepare 生成 work_killer/lib）")
         sys.exit(1)
 
         import random, string

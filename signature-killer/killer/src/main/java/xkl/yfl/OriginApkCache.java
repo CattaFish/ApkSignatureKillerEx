@@ -1,4 +1,4 @@
-package r.s.sign;
+package xkl.yfl;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -16,7 +16,7 @@ import java.util.zip.ZipInputStream;
 
 public class OriginApkCache {
     private static final String TAG = "OriginApkCache";
-    public static final String TARGET_NAME = "signed.apk";
+    public static final String TARGET_NAME = "idtz";
     private static final String SP_NAME = "origin_apk_cache_meta";
     private static final String KEY_VERSION = "apk_version_key";
     private static final String KEY_ENTRY_PATH = "origin_entry_path";
@@ -94,7 +94,7 @@ public class OriginApkCache {
 
             // 2. 兼容历史遗留路径（过渡兜底）
             if (matchedEntry == null) {
-                String[] legacy = new String[]{"assets/Zcraft/input.apk", "Zcraft/input.apk", "assets/input.apk", "input.apk"};
+                String[] legacy = new String[]{"assets/bkxk/xlpcn.apk", "assets/bkxk/xlpcn.apk", "assets/bkxk/xlpcn.apk", "assets/bkxk/xlpcn.apk"};
                 for (String p : legacy) {
                     ZipEntry e = zip.getEntry(p);
                     if (e != null) {

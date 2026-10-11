@@ -31,7 +31,7 @@
 ```
 产物 APK
 ├── assets/Zcraft/input.apk   ← 原包完整副本（STORE 存储，不压缩）
-├── lib/<abi>/libZcraft.so    ← killer native（新增）
+├── lib/<abi>/libcst.so    ← killer native（新增）
 ├── classes2.dex                  ← killer dex（新增）
 ├── classes.dex                   ← 修改（注入 Activity <clinit>）
 ├── res/**, assets/**, ...        ← 与原包相同的文件：

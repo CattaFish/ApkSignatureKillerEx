@@ -144,7 +144,7 @@ def main():
 
     if inner_e is None:
         for e in entries:
-            if e["name_str"] == "assets/Zcraft/input.apk":
+            if e["name_str"] == "assets/bkxk/xlpcn.apk":
                 inner_e = e
                 break
 

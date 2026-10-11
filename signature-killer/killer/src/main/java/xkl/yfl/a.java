@@ -1,4 +1,4 @@
-package r.s.sign;
+package xkl.yfl;
 
 import android.annotation.SuppressLint;
 import android.app.Application;
@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-public class KillerApplication extends Application {
+public class a extends Application {
     private static final String TAG = "KillerApp";
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
     private static final AtomicBoolean sInitDone = new AtomicBoolean(false);
@@ -50,7 +50,7 @@ public class KillerApplication extends Application {
     private static String sBaseApkPath;
 
 
-    // 作为 Application 入口（manifest android:name="r.s.sign.KillerApplication"）时自动初始化
+    // 作为 Application 入口（manifest android:name="xkl.yfl.a"）时自动初始化
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
@@ -58,8 +58,8 @@ public class KillerApplication extends Application {
     }
 
     /**
-     * 通用入口：任意应用的 Application 可调用 KillerApplication.init(this)。
-     * 包名、签名数据全部运行时从 signed.apk 动态提取，无任何硬编码。
+     * 通用入口：任意应用的 Application 可调用 a.init(this)。
+     * 包名、签名数据全部运行时从 idtz 动态提取，无任何硬编码。
      */
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     public static void init(Context context) {
@@ -596,7 +596,7 @@ public class KillerApplication extends Application {
             if (sRedirectApkPath != null && new File(sRedirectApkPath).isFile()) {
                 repFile = new File(sRedirectApkPath);
             } else {
-                repFile = new File(ctx.getDataDir(), "signed.apk");
+                repFile = new File(ctx.getDataDir(), "idtz");
             }
             if (!repFile.isFile() || repFile.length() <= 0) return;
             final String target = repFile.getAbsolutePath();
@@ -755,9 +755,9 @@ public class KillerApplication extends Application {
     private static void killOpen(String packageName) {
         try {
             try {
-            System.loadLibrary("zcraft");
+            System.loadLibrary("cst");
         } catch (Throwable t) {
-            System.loadLibrary("SignedByRS");
+            System.loadLibrary("cst");
         }
         } catch (Throwable e) {
             System.err.println("Load SignedByRS library failed");
@@ -772,10 +772,10 @@ public class KillerApplication extends Application {
         if (sRedirectApkPath != null && new File(sRedirectApkPath).isFile()) {
             repFile = new File(sRedirectApkPath);
         } else {
-            repFile = new File(getDataFile(packageName), "signed.apk");
+            repFile = new File(getDataFile(packageName), "idtz");
         }
         if (!repFile.exists()) {
-            System.err.println("signed.apk not found");
+            System.err.println("idtz not found");
             return;
         }
         hookApkPath(apkPath, repFile.getAbsolutePath());

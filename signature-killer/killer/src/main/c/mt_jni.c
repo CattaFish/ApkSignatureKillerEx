@@ -116,7 +116,6 @@ static int openImpl(const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_WARN("REDIRECT open %s -> %s", pathname, sigb_get_rep_path());
         return old_open(sigb_get_rep_path(), flags, mode);
     }
     return old_open(pathname, flags, mode);
@@ -135,7 +134,6 @@ static int open64Impl(const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_WARN("REDIRECT open64 %s -> %s", pathname, sigb_get_rep_path());
         return old_open64(sigb_get_rep_path(), flags, mode);
     }
     return old_open64(pathname, flags, mode);
@@ -154,7 +152,6 @@ static int openatImpl(int fd, const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_WARN("REDIRECT openat %s -> %s", pathname, sigb_get_rep_path());
         return old_openat(fd, sigb_get_rep_path(), flags, mode);
     }
     return old_openat(fd, pathname, flags, mode);
@@ -173,7 +170,6 @@ static int openat64Impl(int fd, const char *pathname, int flags, mode_t mode) {
         }
     }
     if (sigb_resolve(pathname) != pathname){
-        XH_LOG_WARN("REDIRECT openat64 %s -> %s", pathname, sigb_get_rep_path());
         return old_openat64(fd, sigb_get_rep_path(), flags, mode);
     }
     return old_openat64(fd, pathname, flags, mode);
@@ -184,8 +180,6 @@ Java_xkl_yfl_a_hookApkPath(JNIEnv *env, __attribute__((unused)) jclass clazz, js
     const char *apk_path = (*env)->GetStringUTFChars(env, apkPath, 0);
     const char *rep_path = (*env)->GetStringUTFChars(env, repPath, 0);
     sigb_set_target_paths(apk_path, rep_path);
-    XH_LOG_WARN("SIGB_BUILD_MARKER=%s", sigb_build_marker());
-    XH_LOG_WARN("SIGB_REP=%s", rep_path);
     (*env)->ReleaseStringUTFChars(env, apkPath, apk_path);
     (*env)->ReleaseStringUTFChars(env, repPath, rep_path);
 
@@ -311,7 +305,6 @@ static FILE *fopenImpl(const char *pathname, const char *mode) {
         read_only = 1;
     }
     if (read_only && sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT fopen %s -> %s", pathname, sigb_get_rep_path());
         return old_fopen(sigb_get_rep_path(), mode);
     }
     if (old_fopen == NULL) { errno = ENOSYS; return NULL; }
@@ -330,7 +323,6 @@ static int __open_2Impl(const char *pathname, int flags) {
         }
     }
     if (sigb_resolve(pathname) != pathname) {
-        XH_LOG_WARN("REDIRECT __open_2 %s -> %s", pathname, sigb_get_rep_path());
         return old___open_2(sigb_get_rep_path(), flags);
     }
     if (old___open_2 == NULL) { errno = ENOSYS; return -1; }
@@ -359,7 +351,6 @@ static int serve_sanitized_proc(const char *pathname) {
     free(clean);
     if (memfd < 0) return -1;
 
-    XH_LOG_WARN("SANITIZED %s -> memfd:vvdf", pathname);
     return memfd;
 }
 

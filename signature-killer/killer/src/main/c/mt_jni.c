@@ -64,13 +64,13 @@ static int serve_sanitized_proc(const char *pathname);
 static void *(*old_dlopen)(const char *, int);
 static void *(*old_android_dlopen_ext)(const char *, int, const void *);
 
-static void sigb_refresh_after_load(void) {
+static __attribute__((unused)) void sigb_refresh_after_load(void) {
     sigb_set_state(SIGB_STATE_REENTRY);
     xhook_refresh(0);
     sigb_set_state(SIGB_STATE_NORMAL);
 }
 
-static void *dlopenImpl(const char *filename, int flags) {
+static __attribute__((unused)) void *dlopenImpl(const char *filename, int flags) {
     void *h = old_dlopen != NULL ? old_dlopen(filename, flags) : dlopen(filename, flags);
 #if SIGB_ENABLE_DLOPEN_REFRESH
     if (h != NULL) {
@@ -80,7 +80,7 @@ static void *dlopenImpl(const char *filename, int flags) {
     return h;
 }
 
-static void *android_dlopen_extImpl(const char *filename, int flags, const void *extinfo) {
+static __attribute__((unused)) void *android_dlopen_extImpl(const char *filename, int flags, const void *extinfo) {
     static void *(*real_android_dlopen_ext)(const char *, int, const void *) = NULL;
     if (real_android_dlopen_ext == NULL) {
         real_android_dlopen_ext = (void *(*)(const char *, int, const void *))
@@ -382,7 +382,7 @@ static int sanitizedDlCallback(struct dl_phdr_info *info, size_t size, void *dat
     return ctx->callback(info, size, ctx->data);
 }
 
-static int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void *), void *data) {
+static __attribute__((unused)) int dlIteratePhdrImpl(int (*callback)(struct dl_phdr_info *, size_t, void *), void *data) {
     if (old_dl_iterate_phdr == NULL) {
         errno = ENOSYS;
         return 0;

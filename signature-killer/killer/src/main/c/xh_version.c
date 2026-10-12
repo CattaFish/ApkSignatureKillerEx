@@ -48,7 +48,7 @@
 #define XH_VERSION_ARCH "unknown"
 #endif
 
-#define XH_VERSION_STR_FULL "kq"
+#define XH_VERSION_STR_FULL "libxhook "XH_VERSION_STR" ("XH_VERSION_ARCH")"
 
 unsigned int xh_version()
 {

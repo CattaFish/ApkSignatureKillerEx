@@ -36,7 +36,7 @@ int sigb_is_thread_bypass(void) {
 }
 
 const char *sigb_build_marker(void) {
-    return "KZ_rruc_6265_obp";
+    return "SIGB_PATH_REWRITE_20261001_829B367";
 }
 
 static char *dup_str(const char *s) {
@@ -73,7 +73,7 @@ const char *sigb_resolve(const char *path) {
     if (g_thread_bypass) {
         return path;
     }
-    // 其余所有情况 (全黑名单)，命中 base.apk 强制重定向至 idtz
+    // 其余所有情况 (全黑名单)，命中 base.apk 强制重定向至 signed.apk
     if (strcmp(path, g_apk_path) == 0) {
         return g_rep_path;
     }
@@ -213,7 +213,7 @@ char *sigb_sanitize_maps(const char *content, int is_smaps) {
             keep = 0;
         }
         if (keep) {
-            /* method A：将 /data 下真实 base.apk 映射路径重写为 idtz，
+            /* method A：将 /data 下真实 base.apk 映射路径重写为 signed.apk，
                inode/dev 保持原样 —— C1 字符串一致，ch7 norm/raw 维度仍一致 */
             const char *rep = sigb_get_rep_path();
             if (rep != NULL && line_len > 1) {

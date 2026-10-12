@@ -175,7 +175,7 @@ def patch_expected_signature(decoded, md5_hex):
 
 
 def inject_clinit_entry(decoded):
-    """在目标启动 Activity 的 <clinit> 第一条指令前插入 a.onLoaded()"""
+    """在目标启动 Activity 的 <clinit> 第一条指令前插入 KillerApplication.onLoaded()"""
     manifest = open(os.path.join(decoded, "AndroidManifest.xml"), encoding="utf-8").read()
     m = re.search(r'<activity\b[^>]*\bandroid:name="([^"]+)"', manifest)
     if not m:
@@ -194,7 +194,7 @@ def inject_clinit_entry(decoded):
         print(f"[warn] 未找到 {rel}，跳过 clinit 插桩")
         return 0
     s = open(target, encoding="utf-8").read()
-    marker = "invoke-static {}, Lxkl/yfl/a;->onLoaded()V"
+    marker = "invoke-static {}, Lr/s/sign/KillerApplication;->onLoaded()V"
     if marker in s:
         return 0
     clinit_pat = re.compile(r'(\.method static constructor <clinit>\(\)V\n(?:\s*\.registers \d+\n)?)')
@@ -267,13 +267,13 @@ def main():
 
     injected = 0
     for abi in ABIS:
-        src = os.path.join(KILLER_LIB, abi, "libcst.so")
+        src = os.path.join(KILLER_LIB, abi, "libZcraft.so")
         if os.path.exists(src):
             dst_dir = os.path.join(DECODED, "lib", abi)
             os.makedirs(dst_dir, exist_ok=True)
-            shutil.copy(src, os.path.join(dst_dir, "libcst.so"))
+            shutil.copy(src, os.path.join(dst_dir, "libZcraft.so"))
             injected += 1
-            print(f"[ok] lib/{abi}/libcst.so")
+            print(f"[ok] lib/{abi}/libZcraft.so")
     if injected == 0:
         print("FAIL: 没有注入任何 .so（先运行 prepare 生成 work_killer）")
         sys.exit(1)

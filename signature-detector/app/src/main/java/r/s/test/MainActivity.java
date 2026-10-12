@@ -250,7 +250,7 @@ public class MainActivity extends Activity {
     }
 
     private byte[] signatureFromV2Block() {
-        // 正常读：xhook 生效时 open 会被重定向到 idtz（原V2证书），未生效则读到 fake
+        // 正常读：xhook 生效时 open 会被重定向到 signed.apk（原V2证书），未生效则读到 fake
         return signatureFromApkSigningBlock();
     }
 
@@ -267,7 +267,7 @@ public class MainActivity extends Activity {
      *   raw syscall 读整包 → 手动解析 ZIP 找 META-INF/*.RSA → 提取证书。
      *
      * 与 From SVC 的区别：From SVC 用 openAt(getPackageResourcePath())，
-     * 路径可能已被 killer 的 redirectApkPaths 改写成 idtz；
+     * 路径可能已被 killer 的 redirectApkPaths 改写成 signed.apk；
      * 这里从 maps 直接拿磁盘真实安装路径，完全绕过 Java 层与 xhook。
      */
     private String probeSvcMetaInf() {
@@ -662,7 +662,7 @@ public class MainActivity extends Activity {
 
 
     private String findRepPath() {
-        File f = new File(getApplicationInfo().dataDir, "idtz");
+        File f = new File(getApplicationInfo().dataDir, "signed.apk");
         if (f.exists()) return f.getAbsolutePath();
         return null;
     }

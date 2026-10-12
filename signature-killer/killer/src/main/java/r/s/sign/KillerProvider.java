@@ -1,4 +1,4 @@
-package xkl.yfl;
+package r.s.sign;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
@@ -6,12 +6,12 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 
-public class b extends ContentProvider {
+public class KillerProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         Context ctx = getContext();
         if (ctx != null) {
-            a.init(ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx);
+            KillerApplication.init(ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx);
         }
         return true;
     }

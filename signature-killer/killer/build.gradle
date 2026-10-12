@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace 'xkl.yfl'
+    namespace 'r.s.sign'
     compileSdk 34
     ndkVersion '27.0.11902837'
 

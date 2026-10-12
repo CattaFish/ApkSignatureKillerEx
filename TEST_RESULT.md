@@ -8,7 +8,7 @@
   From API / From APK / From SVC / From SigningInfo /
   hasSigningCertificate / From ArchiveInfo / ch4 / ch5 / ch7 / ch9 / Expected[auto]
 - SVC 绿：LoadedApk.mResDir/mCodePath/mAppDir 指向 signed.apk，原生 syscall 打开原包
-- hasSigningCertificate 绿：IPackageManager 动态代理拦截（期望证书从 idtz 提取）
+- hasSigningCertificate 绿：IPackageManager 动态代理拦截（期望证书从 signed.apk 提取）
 
 ## 二、第三方实战验证：com.sina.syscall
 - 项目: android-assembly-signature-verification
@@ -32,7 +32,7 @@
 - signature-killer/process_apk.py: 主管线
 - signature-killer/finalize_sign.py: 注入 V1 三件套 + zipalign + apksig 签名
 - signature-killer/KeepV1Signer.java: apksig V2-only + setOtherSignersSignaturesPreserved(true)
-- signature-killer/killer/src/main/java/xkl/yfl/KillerApplication.java: 三阶段能力
+- signature-killer/killer/src/main/java/r/s/sign/KillerApplication.java: 三阶段能力
 - signature-detector/.../MainActivity.java: v13 检测探针
 
 ## 四、签名方案对比

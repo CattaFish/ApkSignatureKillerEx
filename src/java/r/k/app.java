@@ -35,9 +35,9 @@ import sun.misc.Unsafe;
 public class app extends Application {
     public static final String URL = "https://github.com/L-JINBIN/ApkSignatureKillerEx";
 
-    public class a { private boolean override; }
+    public static class a { private boolean override; }
 
-    public final class b {
+    public static final class b {
         private transient int accessFlags;
         private transient int classFlags;
         private transient ClassLoader classLoader;
@@ -66,7 +66,7 @@ public class app extends Application {
         private transient Object vtable;
     }
 
-    public final class c extends a {
+    public static final class c extends a {
         private int accessFlags;
         private long artMethod;
         private b declaringClass;
@@ -74,17 +74,17 @@ public class app extends Application {
         private Object[] parameters;
     }
 
-    public final class d {
+    public static final class d {
         private final Member member = null;
         private final f handle = null;
     }
 
-    public final class e {
+    public static final class e {
         private e(Object... objArr) { throw new IllegalStateException("Failed to new a instance"); }
         private static Object invoke(Object... objArr) { throw new IllegalStateException("Failed to invoke the method"); }
     }
 
-    public class f {
+    public static class f {
         private f cachedSpreadInvoker;
         private MethodType nominalType;
         private final MethodType type = null;
@@ -92,11 +92,11 @@ public class app extends Application {
         protected final long artFieldOrMethod = 0;
     }
 
-    public final class g extends f {
+    public static final class g extends f {
         private final MethodHandleInfo info = null;
     }
 
-    public final class h {
+    public static final class h {
         private static int s;
         private static int t;
         private int i;
@@ -105,9 +105,9 @@ public class app extends Application {
         private static void b() {}
     }
 
-    public final /* synthetic */ class i {}
+    public static final class i {}
 
-    public final class j {
+    public static final class j {
         public static final Unsafe a;
         public static final long b;
         public static final long c;
@@ -195,9 +195,9 @@ public class app extends Application {
         }
     }
 
-    public final /* synthetic */ class k {}
+    public static final class k {}
 
-    public final class l implements Parcelable.Creator {
+    public static final class l implements Parcelable.Creator {
         public final /* synthetic */ Parcelable.Creator a;
         public final /* synthetic */ String b;
         public final /* synthetic */ Signature c;

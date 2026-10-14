@@ -1,6 +1,8 @@
 name: Replica Build
 
 on:
+  push:
+    branches: [replica]
   workflow_dispatch:
     inputs:
       original_apk:
@@ -54,25 +56,37 @@ jobs:
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
           ls -la tools/
 
-      - name: Dump build.py for debug
+      - name: Set build parameters
+        id: params
         run: |
-          echo "=== head ==="
-          head -60 tools/build.py
-          echo "=== tail ==="
-          tail -30 tools/build.py
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ORIGINAL_APK=${{ inputs.original_apk }}" >> $GITHUB_ENV
+            echo "SO_NAME=${{ inputs.so_name }}" >> $GITHUB_ENV
+            echo "ASSET_DIR=${{ inputs.asset_dir }}" >> $GITHUB_ENV
+            echo "ASSET_NAME=${{ inputs.asset_name }}" >> $GITHUB_ENV
+            echo "FILES_DIR=${{ inputs.files_dir }}" >> $GITHUB_ENV
+            echo "OUTPUT_APK=${{ inputs.output_name }}" >> $GITHUB_ENV
+          else
+            echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
+            echo "SO_NAME=k" >> $GITHUB_ENV
+            echo "ASSET_DIR=SginatareKiler" >> $GITHUB_ENV
+            echo "ASSET_NAME=0rigih.apk" >> $GITHUB_ENV
+            echo "FILES_DIR=files/k" >> $GITHUB_ENV
+            echo "OUTPUT_APK=output.apk" >> $GITHUB_ENV
+          fi
+          echo "INPUT_APK=input.apk" >> $GITHUB_ENV
 
       - name: Run build
-        env:
-          INPUT_APK: input.apk
-          ORIGINAL_APK: ${{ inputs.original_apk }}
-          OUTPUT_APK: ${{ inputs.output_name }}
-          SO_NAME: ${{ inputs.so_name }}
-          ASSET_DIR: ${{ inputs.asset_dir }}
-          ASSET_NAME: ${{ inputs.asset_name }}
-          FILES_DIR: ${{ inputs.files_dir }}
         run: |
           export ANDROID_NDK_HOME="$(ls -d $ANDROID_HOME/ndk/* | head -1)"
           echo "NDK=$ANDROID_NDK_HOME"
+          echo "INPUT_APK=$INPUT_APK"
+          echo "ORIGINAL_APK=$ORIGINAL_APK"
+          echo "SO_NAME=$SO_NAME"
+          echo "ASSET_DIR=$ASSET_DIR"
+          echo "ASSET_NAME=$ASSET_NAME"
+          echo "FILES_DIR=$FILES_DIR"
+          echo "OUTPUT_APK=$OUTPUT_APK"
           ls -la input.apk
           python3 -u tools/build.py 2>&1
           echo "EXIT=$?"

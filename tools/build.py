@@ -111,6 +111,7 @@ def compile_java_to_dex(out_dir, java_src_dir):
         "-target", "1.8",
         "-bootclasspath", android_jar,
         "-classpath", f"{stub_dir}{os.pathsep}{classes_dir}",
+        "-sourcepath", str(stub_dir),
         "-d", str(classes_dir), *java_files
     ]
     r = run(cmd)
@@ -373,22 +374,21 @@ def main():
     log(f"Target package: {TARGET_PKG}")
     log(f"Signature len : {len(SIGNATURE_B64)} chars")
 
-    # 复制 Java 源到临时目录并替换占位符
-    java_src = work / "java_src"
-    shutil.copytree(ROOT / "src" / "java" / "r", java_src / "r")
-    src_java = java_src / "r" / "k" / "app.java"
-    src_text = src_java.read_text(encoding="utf-8")
-    src_text = src_text.replace("%%TARGET_PKG%%", TARGET_PKG)
-    src_text = src_text.replace("%%SIGNATURE_B64%%", SIGNATURE_B64)
-    src_text = src_text.replace("%%LIB_NAME%%", SO_NAME)
-    src_text = src_text.replace("%%ASSET_PATH%%", f"assets/{ASSET_DIR}/{ASSET_NAME}")
-    src_text = src_text.replace("%%FILES_DIR%%", FILES_DIR)
-    src_java.write_text(src_text, encoding="utf-8")
-    log("Java template updated")
-
-    # 工作目录
     with tempfile.TemporaryDirectory(prefix="apksig_", dir=str(ROOT)) as tmp:
         work = Path(tmp)
+
+        # 复制 Java 源到临时目录并替换占位符
+        java_src = work / "java_src"
+        shutil.copytree(ROOT / "src" / "java" / "r", java_src / "r")
+        src_java = java_src / "r" / "k" / "app.java"
+        src_text = src_java.read_text(encoding="utf-8")
+        src_text = src_text.replace("%%TARGET_PKG%%", TARGET_PKG)
+        src_text = src_text.replace("%%SIGNATURE_B64%%", SIGNATURE_B64)
+        src_text = src_text.replace("%%LIB_NAME%%", SO_NAME)
+        src_text = src_text.replace("%%ASSET_PATH%%", f"assets/{ASSET_DIR}/{ASSET_NAME}")
+        src_text = src_text.replace("%%FILES_DIR%%", FILES_DIR)
+        src_java.write_text(src_text, encoding="utf-8")
+        log("Java template updated")
 
         # 1. 编译 Java → dex
         dex_file = compile_java_to_dex(work, java_src)
@@ -411,6 +411,3 @@ def main():
 
     log("BUILD SUCCESS")
     print(f"\nResult: {ROOT / OUTPUT_APK}")
-
-if __name__ == "__main__":
-    main()

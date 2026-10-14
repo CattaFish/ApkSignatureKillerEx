@@ -1,0 +1,90 @@
+name: Replica Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      original_apk:
+        description: '原版APK文件名（仓库根目录），默认用 input.apk'
+        required: false
+        default: 'input.apk'
+      so_name:
+        description: 'native库名（不含lib前缀）'
+        required: false
+        default: 'k'
+      asset_dir:
+        description: 'assets子目录'
+        required: false
+        default: 'SginatareKiler'
+      asset_name:
+        description: '原包APK文件名'
+        required: false
+        default: '0rigih.apk'
+      files_dir:
+        description: '释放目录（相对 /data/data/<pkg>/）'
+        required: false
+        default: 'files/k'
+      output_name:
+        description: '输出APK文件名'
+        required: false
+        default: 'output.apk'
+  push:
+    branches: [replica]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ORIGINAL_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.original_apk || 'input.apk' }}
+      OUTPUT_APK:   ${{ github.event_name == 'workflow_dispatch' && inputs.output_name || 'output.apk' }}
+      SO_NAME:      ${{ github.event_name == 'workflow_dispatch' && inputs.so_name || 'k' }}
+      ASSET_DIR:    ${{ github.event_name == 'workflow_dispatch' && inputs.asset_dir || 'SginatareKiler' }}
+      ASSET_NAME:   ${{ github.event_name == 'workflow_dispatch' && inputs.asset_name || '0rigih.apk' }}
+      FILES_DIR:    ${{ github.event_name == 'workflow_dispatch' && inputs.files_dir || 'files/k' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK platform & build-tools
+        run: |
+          sdkmanager "platforms;android-32" "build-tools;32.0.0" --sdk_root="$ANDROID_HOME"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+      - name: Install NDK
+        uses: jurplel/install-ndk-action@v1
+        with:
+          ndk-version: r25c
+
+      - name: Download apktool & baksmali
+        run: |
+          mkdir -p tools
+          curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
+
+      - name: Verify input.apk exists
+        run: |
+          ls -la input.apk
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
+      - name: Run replica build
+        env:
+          INPUT_APK: input.apk
+          ANDROID_HOME: $ANDROID_HOME
+          ANDROID_NDK_HOME: $ANDROID_NDK_HOME
+        run: |
+          python3 tools/build.py
+
+      - name: Upload output APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-apk
+          path: output.apk
+          if-no-files-found: error

@@ -41,7 +41,7 @@ def die(msg):
 
 def run(cmd, **kw):
     log("+ " + " ".join(str(c) for c in cmd))
-    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, **kw)
+    return subprocess.run([str(c) for c in cmd], **kw)
 
 def find_sdk_tool(name):
     """在 SDK build-tools 里查找可执行文件"""

@@ -47,16 +47,22 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME/build-tools" || true
           ls "$ANDROID_HOME/ndk" || true
-          ls "$ANDROID_HOME/platforms" | tail -3 || true
+          which aapt aapt2 d8 apksigner || true
 
       - name: Download apktool & baksmali
         run: |
           mkdir -p tools
           curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
+          ls -la tools/*.jar
 
-      - name: Verify input.apk exists
-        run: ls -la input.apk
+      - name: Sanity check build.py
+        run: |
+          python3 -c "import ast; ast.parse(open('tools/build.py').read()); print('[OK] build.py syntax valid')"
+          grep -n "def compile_java_to_dex" tools/build.py
+          grep -n "java_src" tools/build.py | head -5
+          echo "---"
+          ls -la input.apk
 
       - name: Run replica build
         env:
@@ -70,11 +76,26 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$(ls -d $ANDROID_HOME/ndk/* | head -1)"
           echo "NDK=$ANDROID_NDK_HOME"
-          python3 tools/build.py
+          echo "=== python3 build.py ==="
+          python3 -u tools/build.py 2>&1
+          echo "=== build.py exit: $? ==="
+
+      - name: List workspace
+        run: |
+          echo "=== output.apk ==="
+          ls -la output.apk 2>&1 || echo "output.apk NOT FOUND"
+          echo "=== workspace root ==="
+          ls -la
+          echo "=== any apk anywhere ==="
+          find . -name "*.apk" -not -path "./tools/*" 2>/dev/null | head -20
 
       - name: Upload output APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: output-apk
-          path: output.apk
-          if-no-files-found: error
+          name: build-output
+          path: |
+            output.apk
+            *.log
+            !tools/*.jar
+          if-no-files-found: ignore

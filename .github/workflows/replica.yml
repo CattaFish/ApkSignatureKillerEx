@@ -27,8 +27,6 @@ on:
         description: '输出APK文件名'
         required: false
         default: 'output.apk'
-  push:
-    branches: [replica]
 
 jobs:
   build:
@@ -42,60 +40,52 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Check preinstalled Android SDK
+      - name: Check Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME/build-tools" || true
           ls "$ANDROID_HOME/ndk" || true
-          which aapt aapt2 d8 apksigner || true
+          which aapt aapt2 d8 apksigner javac || true
 
-      - name: Download apktool & baksmali
+      - name: Download tools
         run: |
           mkdir -p tools
           curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
-          ls -la tools/*.jar
+          ls -la tools/
 
-      - name: Sanity check build.py
+      - name: Dump build.py for debug
         run: |
-          python3 -c "import ast; ast.parse(open('tools/build.py').read()); print('[OK] build.py syntax valid')"
-          grep -n "def compile_java_to_dex" tools/build.py
-          grep -n "java_src" tools/build.py | head -5
-          echo "---"
-          ls -la input.apk
+          echo "=== head ==="
+          head -60 tools/build.py
+          echo "=== tail ==="
+          tail -30 tools/build.py
 
-      - name: Run replica build
+      - name: Run build
         env:
           INPUT_APK: input.apk
-          ORIGINAL_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.original_apk || 'input.apk' }}
-          OUTPUT_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.output_name || 'output.apk' }}
-          SO_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.so_name || 'k' }}
-          ASSET_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_dir || 'SginatareKiler' }}
-          ASSET_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_name || '0rigih.apk' }}
-          FILES_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.files_dir || 'files/k' }}
+          ORIGINAL_APK: ${{ inputs.original_apk }}
+          OUTPUT_APK: ${{ inputs.output_name }}
+          SO_NAME: ${{ inputs.so_name }}
+          ASSET_DIR: ${{ inputs.asset_dir }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+          FILES_DIR: ${{ inputs.files_dir }}
         run: |
           export ANDROID_NDK_HOME="$(ls -d $ANDROID_HOME/ndk/* | head -1)"
           echo "NDK=$ANDROID_NDK_HOME"
-          echo "=== python3 build.py ==="
+          ls -la input.apk
           python3 -u tools/build.py 2>&1
-          echo "=== build.py exit: $? ==="
+          echo "EXIT=$?"
 
-      - name: List workspace
+      - name: List results
         run: |
-          echo "=== output.apk ==="
-          ls -la output.apk 2>&1 || echo "output.apk NOT FOUND"
-          echo "=== workspace root ==="
-          ls -la
-          echo "=== any apk anywhere ==="
-          find . -name "*.apk" -not -path "./tools/*" 2>/dev/null | head -20
+          ls -la output.apk 2>&1 || echo "no output.apk"
+          find . -name "*.apk" -not -path "./tools/*" 2>/dev/null
 
-      - name: Upload output APK
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-output
-          path: |
-            output.apk
-            *.log
-            !tools/*.jar
+          path: output.apk
           if-no-files-found: ignore

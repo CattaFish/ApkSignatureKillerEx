@@ -33,13 +33,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ORIGINAL_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.original_apk || 'input.apk' }}
-      OUTPUT_APK:   ${{ github.event_name == 'workflow_dispatch' && inputs.output_name || 'output.apk' }}
-      SO_NAME:      ${{ github.event_name == 'workflow_dispatch' && inputs.so_name || 'k' }}
-      ASSET_DIR:    ${{ github.event_name == 'workflow_dispatch' && inputs.asset_dir || 'SginatareKiler' }}
-      ASSET_NAME:   ${{ github.event_name == 'workflow_dispatch' && inputs.asset_name || '0rigih.apk' }}
-      FILES_DIR:    ${{ github.event_name == 'workflow_dispatch' && inputs.files_dir || 'files/k' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,15 +45,15 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK platform & build-tools
+      - name: Install SDK platform, build-tools & NDK
         run: |
-          sdkmanager "platforms;android-32" "build-tools;32.0.0" --sdk_root="$ANDROID_HOME"
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-32" "build-tools;32.0.0" "ndk;25.2.9519653" --sdk_root="$ANDROID_HOME"
 
-      - name: Install NDK
-        uses: jurplel/install-ndk-action@v1
-        with:
-          ndk-version: r25c
+      - name: Install ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
 
       - name: Download apktool & baksmali
         run: |
@@ -72,14 +65,20 @@ jobs:
         run: |
           ls -la input.apk
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
       - name: Run replica build
         env:
           INPUT_APK: input.apk
-          ANDROID_HOME: $ANDROID_HOME
-          ANDROID_NDK_HOME: $ANDROID_NDK_HOME
+          ORIGINAL_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.original_apk || 'input.apk' }}
+          OUTPUT_APK: ${{ github.event_name == 'workflow_dispatch' && inputs.output_name || 'output.apk' }}
+          SO_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.so_name || 'k' }}
+          ASSET_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_dir || 'SginatareKiler' }}
+          ASSET_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_name || '0rigih.apk' }}
+          FILES_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.files_dir || 'files/k' }}
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/25.2.9519653"
+          echo "NDK=$ANDROID_NDK_HOME"
+          ls "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
           python3 tools/build.py
 
       - name: Upload output APK

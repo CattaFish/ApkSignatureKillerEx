@@ -42,18 +42,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK platform, build-tools & NDK
+      - name: Check preinstalled Android SDK
         run: |
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-32" "build-tools;32.0.0" "ndk;25.2.9519653" --sdk_root="$ANDROID_HOME"
-
-      - name: Install ninja
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/build-tools" || true
+          ls "$ANDROID_HOME/ndk" || true
+          ls "$ANDROID_HOME/platforms" | tail -3 || true
 
       - name: Download apktool & baksmali
         run: |
@@ -62,9 +56,7 @@ jobs:
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
 
       - name: Verify input.apk exists
-        run: |
-          ls -la input.apk
-          echo "ANDROID_HOME=$ANDROID_HOME"
+        run: ls -la input.apk
 
       - name: Run replica build
         env:
@@ -76,9 +68,8 @@ jobs:
           ASSET_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.asset_name || '0rigih.apk' }}
           FILES_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.files_dir || 'files/k' }}
         run: |
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/25.2.9519653"
+          export ANDROID_NDK_HOME="$(ls -d $ANDROID_HOME/ndk/* | head -1)"
           echo "NDK=$ANDROID_NDK_HOME"
-          ls "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
           python3 tools/build.py
 
       - name: Upload output APK

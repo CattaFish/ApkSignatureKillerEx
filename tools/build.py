@@ -356,13 +356,16 @@ def main():
     # 读取目标包名
     global TARGET_PKG
     if not TARGET_PKG:
-        aapt = find_sdk_tool("aapt")
-        r = run([aapt, "dump", "badging", str(input_apk)])
-        if r.returncode == 0:
-            m = re.search(r"package: name='([^']+)'", r.stdout)
-            if m:
-                TARGET_PKG = m.group(1)
-                log(f"Auto-detected package: {TARGET_PKG}")
+        for tool in ("aapt", "aapt2"):
+            aapt = find_sdk_tool(tool)
+            if aapt:
+                r = run([aapt, "dump", "badging", str(input_apk)])
+                if r.returncode == 0:
+                    m = re.search(r"package: name='([^']+)'", r.stdout)
+                    if m:
+                        TARGET_PKG = m.group(1)
+                        log(f"Auto-detected package: {TARGET_PKG}")
+                        break
 
     if not TARGET_PKG:
         die("Cannot determine target package. Set TARGET_PKG env.")

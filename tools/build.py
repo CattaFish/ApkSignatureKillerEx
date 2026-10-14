@@ -89,10 +89,11 @@ def compile_java(out):
     r = run(cmd)
     if r.returncode != 0:
         die("javac failed")
-    # 移除 stub 编译产物（sun/misc），避免 d8 冲突
-    sun = cls / "sun"
-    if sun.exists():
-        shutil.rmtree(sun)
+    # 移除所有 stub 编译产物（sun/ dalvik/），避免 d8 冲突
+    for stub_pkg in ("sun", "dalvik"):
+        d = cls / stub_pkg
+        if d.exists():
+            shutil.rmtree(d)
     classes = list(cls.rglob("*.class"))
     if not classes:
         die("no classes after javac")

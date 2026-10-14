@@ -154,7 +154,7 @@ public class app extends Application {
             }
         }
 
-        public static Object a(Class cls, Object obj, String str, Object... objArr) throws NoSuchMethodException, IllegalAccessException {
+        public static Object a(Class cls, Object obj, String str, Object... objArr) throws NoSuchMethodException, IllegalAccessException, java.lang.reflect.InvocationTargetException {
             int i = 0;
             if (obj != null && !cls.isInstance(obj)) throw new IllegalArgumentException("this object is not an instance of the given class");
             Method declaredMethod = e.class.getDeclaredMethod("invoke", Object[].class);

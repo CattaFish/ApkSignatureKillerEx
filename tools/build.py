@@ -66,8 +66,7 @@ def extract_signature(apk):
     with zipfile.ZipFile(apk) as z:
         for n in z.namelist():
             if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n):
-                b64 = base64.b64encode(z.read(n)).decode()
-                return "\n".join(b64[i:i+76] for i in range(0, len(b64), 76))
+                return base64.b64encode(z.read(n)).decode()
     die("No signature file in " + str(apk))
 
 def compile_java(out):
@@ -263,7 +262,10 @@ def main():
         ap = java_src / "r/k/app.java"
         t = ap.read_text(encoding="utf-8")
         t = t.replace("%%TARGET_PKG%%", TARGET_PKG)
-        t = t.replace("%%SIGNATURE_B64%%", SIGNATURE_B64)
+        # 每76字符转折行，拼 Java 字符串
+        sig_lines = [SIGNATURE_B64[i:i+76] for i in range(0, len(SIGNATURE_B64), 76)]
+        sig_java = "\n" + "\n".join('"' + line + '\n"' for line in sig_lines)
+        t = t.replace("%%SIGNATURE_B64%%", sig_java)
         t = t.replace("%%LIB_NAME%%", SO_NAME)
         t = t.replace("%%ASSET_PATH%%", "assets/" + ASSET_DIR + "/" + ASSET_NAME)
         t = t.replace("%%FILES_DIR%%", FILES_DIR)

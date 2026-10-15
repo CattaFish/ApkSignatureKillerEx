@@ -3,7 +3,7 @@
 import os, sys, re, shutil, subprocess, tempfile, zipfile, base64, traceback
 from pathlib import Path
 
-print("=== build.py loaded ===", flush=True)
+print("=== build.py loaded (classesN inject mode) ===", flush=True)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -20,7 +20,6 @@ ANDROID_HOME  = os.environ.get("ANDROID_HOME", "")
 NDK_HOME      = os.environ.get("ANDROID_NDK_HOME", "") or os.environ.get("NDK_HOME", "")
 
 APKTOOL_JAR   = ROOT / "tools/apktool.jar"
-BAKSMALI_JAR  = ROOT / "tools/baksmali.jar"
 
 def log(m):
     print("[build] " + str(m), flush=True)
@@ -89,7 +88,7 @@ def compile_java(out):
     r = run(cmd)
     if r.returncode != 0:
         die("javac failed")
-    # 移除所有 stub 编译产物（sun/ dalvik/），避免 d8 冲突
+    # 移除 stub 产物
     for stub_pkg in ("sun", "dalvik"):
         d = cls / stub_pkg
         if d.exists():
@@ -108,7 +107,7 @@ def compile_java(out):
     dex_out = out / "classes.dex"
     if not dex_out.exists():
         die("classes.dex not produced")
-    log("OK classes.dex")
+    log("OK classes.dex size=" + str(dex_out.stat().st_size))
     return dex_out
 
 def build_native(out):
@@ -165,54 +164,83 @@ def build_native(out):
         return None
     return so_dir
 
-def inject(input_apk, original_apk, so_dir, dex_file, out):
-    log("apktool decode")
-    dec = out / "decoded"
-    dec.mkdir(parents=True, exist_ok=True)
-    r = run(["java", "-jar", str(APKTOOL_JAR), "d", "-f", "-o", str(dec), str(input_apk)])
-    if r.returncode != 0:
-        die("apktool d failed")
-    log("baksmali")
-    bs = out / "baksmali"
-    bs.mkdir(parents=True, exist_ok=True)
-    r = run(["java", "-jar", str(BAKSMALI_JAR), "d", str(dex_file), "-o", str(bs)])
-    if r.returncode != 0:
-        die("baksmali failed")
-    smali_dir = dec / "smali"
-    smali_dir.mkdir(parents=True, exist_ok=True)
-    for f in bs.rglob("*.smali"):
-        rel = f.relative_to(bs)
-        dest = smali_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(f, dest)
-    log("inject native libs")
-    if so_dir:
-        for abi in so_dir.iterdir():
-            if abi.is_dir():
-                d = dec / "lib" / abi.name
-                d.mkdir(parents=True, exist_ok=True)
-                for so in abi.glob("*.so"):
-                    shutil.copy(so, d / so.name)
-    log("inject assets")
-    ad = dec / "assets" / ASSET_DIR
-    ad.mkdir(parents=True, exist_ok=True)
-    shutil.copy(original_apk, ad / ASSET_NAME)
-    log("assets/" + ASSET_DIR + "/" + ASSET_NAME)
-    log("patch AndroidManifest")
-    mp = dec / "AndroidManifest.xml"
-    txt = mp.read_text(encoding="utf-8")
+def patch_manifest(decoded_dir):
+    """修改 AndroidManifest.xml，设置 android:name='r.k.app'"""
+    mp = decoded_dir / "AndroidManifest.xml"
+    txt = mp.read_text(encoding="utf-8", errors="ignore")
     m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', txt)
     if m:
-        txt = txt.replace('android:name="' + m.group(1) + '"', 'android:name="r.k.app"')
+        old_name = m.group(1)
+        txt = txt.replace('android:name="' + old_name + '"', 'android:name="r.k.app"')
+        log(f"Application name replaced: {old_name} -> r.k.app")
     else:
         txt = re.sub(r'(<application\b)', r'\1 android:name="r.k.app"', txt, count=1)
+        log("Application name inserted: r.k.app")
     mp.write_text(txt, encoding="utf-8")
-    log("apktool build")
-    unsigned = out / "unsigned.apk"
-    r = run(["java", "-jar", str(APKTOOL_JAR), "b", "-o", str(unsigned), str(dec)])
+
+def inject_classesN(input_apk, output_unsigned, dex_file, so_dir, original_apk, work):
+    """核心：不再 apktool d/b 全量解包，
+    而是 apktool d -s 只解 Manifest（不动 dex），
+    然后直接把 classesN.dex / lib / assets 塞进 APK。"""
+    log("=== classesN inject mode ===")
+
+    # 1. apktool d -s 只解 manifest 和资源
+    dec = work / "decoded"
+    dec.mkdir(parents=True, exist_ok=True)
+    r = run(["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", "-o", str(dec), str(input_apk)])
+    if r.returncode != 0:
+        die("apktool d -s failed (manifest/res decode)")
+
+    # 2. 改 Manifest
+    patch_manifest(dec)
+
+    # 3. apktool b 重打包（不含 dex，但会把原资源/manifest 编回来）
+    #    注意：-s 模式下，apktool b 不会重新生成 dex，原 dex 会怎样？
+    #    实际上 apktool d -s 后，decoded 里没有 dex 文件，build 时不会生成 dex，
+    #    所以需要手动把原 dex 从 input.apk 复制回 output。
+    repacked = work / "repacked.apk"
+    r = run(["java", "-jar", str(APKTOOL_JAR), "b", "-o", str(repacked), str(dec)])
     if r.returncode != 0:
         die("apktool b failed")
-    return unsigned
+    log("repacked (manifest/res only): " + str(repacked.stat().st_size) + " bytes")
+
+    # 4. 把原 APK 的 dex 全部复制进 repacked.apk
+    log("Copy original dex files into output...")
+    with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(repacked, "a") as zout:
+        # 先列出已有 dex
+        existing = set(zout.namelist())
+        for n in zin.namelist():
+            if n.endswith(".dex") and n not in existing:
+                zout.writestr(n, zin.read(n))
+        # 5. 注入编译好的 dex 为 classes20.dex
+        next_idx = 2
+        while f"classes{next_idx}.dex" in existing or f"classes{next_idx}.dex" not in [x for x in zin.namelist() if x.endswith('.dex')]:
+            # 找下一个空余编号
+            all_dex = set(x for x in zin.namelist() if x.endswith(".dex"))
+            if f"classes{next_idx}.dex" not in all_dex and f"classes{next_idx}.dex" not in zout.namelist():
+                break
+            next_idx += 1
+        inject_name = f"classes{next_idx}.dex"
+        log(f"Inject dex as {inject_name}")
+        zout.writestr(inject_name, dex_file.read_bytes())
+
+        # 6. 注入 native lib
+        if so_dir:
+            for abi in so_dir.iterdir():
+                if abi.is_dir():
+                    for so in abi.glob("*.so"):
+                        arc = f"lib/{abi.name}/{so.name}"
+                        zout.writestr(arc, so.read_bytes())
+                        log(f"inject {arc}")
+
+        # 7. 注入 assets 原包
+        asset_arc = f"assets/{ASSET_DIR}/{ASSET_NAME}"
+        if original_apk:
+            zout.writestr(asset_arc, original_apk.read_bytes())
+            log(f"inject {asset_arc} <- {original_apk.name}")
+
+    log("injected APK: " + str(repacked.stat().st_size) + " bytes")
+    return repacked
 
 def sign(unsigned, final):
     log("apksigner sign")
@@ -276,7 +304,7 @@ def main():
             so_dir = build_native(work)
         except Exception as e:
             log("native skip: " + str(e))
-        unsigned = inject(input_apk, original, so_dir, dex_file, work)
+        unsigned = inject_classesN(input_apk, original, dex_file, so_dir, original, work)
         final = ROOT / OUTPUT_APK
         sign(unsigned, final)
     log("BUILD SUCCESS: " + str(ROOT / OUTPUT_APK))

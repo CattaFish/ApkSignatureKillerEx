@@ -74,6 +74,18 @@ jobs:
         if: ${{ inputs.original_url == '' }}
         run: echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
 
+      - name: Test apkanalyzer
+        run: |
+          which apkanalyzer || find "$ANDROID_HOME" -name apkanalyzer -type f 2>/dev/null | head -5
+          APK=$(which apkanalyzer 2>/dev/null || find "$ANDROID_HOME" -name apkanalyzer -type f 2>/dev/null | head -1)
+          echo "APKANALYZER=$APK"
+          if [ -n "$APK" ]; then
+            "$APK" manifest print input.apk | head -100
+          else
+            echo "apkanalyzer not found"
+            ls "$ANDROID_HOME/cmdline-tools" 2>/dev/null || true
+          fi
+
       - name: Run build
         env:
           INPUT_APK: input.apk

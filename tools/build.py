@@ -175,7 +175,18 @@ def patch_manifest(decoded_dir):
     mp = decoded_dir / "AndroidManifest.xml"
     if not mp.exists():
         die("AndroidManifest.xml not found after apktool decode")
-    txt = mp.read_text(encoding="utf-8", errors="ignore")
+    raw = mp.read_bytes()
+    # 严格清理：去掉 BOM/UTF16残留/空字节，截取第一个 '<'
+    raw = raw.replace(b'\xef\xbb\xbf', b'')   # UTF-8 BOM
+    if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+        raw = raw.decode('utf-16', errors='ignore').encode('utf-8')
+    raw = raw.replace(b'\x00', b'')
+    idx = raw.find(b'<')
+    if idx > 0:
+        raw = raw[idx:]
+    txt = raw.decode('utf-8', errors='ignore')
+    if not txt.lstrip().startswith('<?xml') and not txt.lstrip().startswith('<manifest'):
+        die("Manifest still invalid after cleaning: " + repr(raw[:80]))
     m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', txt)
     if m:
         old = m.group(1)
@@ -187,7 +198,7 @@ def patch_manifest(decoded_dir):
     mp.write_text(txt, encoding="utf-8")
 
 def compile_manifest_binary(decoded_dir, work):
-    """用 aapt2/aapt 把文本 Manifest 编译成二进制，返回 AndroidManifest.bin 路径"""
+    """先用 aapt2/aapt 编译清理后的文本 Manifest；失败则用 androguard 直接改二进制 AXML"""
     manifest_text = decoded_dir / "AndroidManifest.xml"
     aj = android_jar()
     out_apk = work / "manifest_bin.apk"
@@ -203,32 +214,88 @@ def compile_manifest_binary(decoded_dir, work):
                  "--version-code", "1",
                  "--version-name", "1.0"])
         if r.returncode == 0:
-            bin_apk = out_apk
             binary_manifest = work / "AndroidManifest.bin"
-            with zipfile.ZipFile(bin_apk) as z:
+            with zipfile.ZipFile(out_apk) as z:
                 if "AndroidManifest.xml" not in z.namelist():
                     die("aapt2 output has no AndroidManifest.xml")
                 binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
             log("OK binary manifest via aapt2 (" + str(binary_manifest.stat().st_size) + " bytes)")
             return binary_manifest
-        log("aapt2 failed, fallback to aapt")
-    aapt = sdk_tool("aapt")
-    if not aapt:
-        die("Neither aapt2 nor aapt found")
-    log("aapt package manifest")
-    r = run([aapt, "package", "-f",
-             "-M", str(manifest_text),
-             "-I", aj,
-             "-F", str(out_apk)])
-    if r.returncode != 0:
-        die("aapt manifest compile failed")
-    binary_manifest = work / "AndroidManifest.bin"
-    with zipfile.ZipFile(out_apk) as z:
+        log("aapt2 failed, try androguard")
+    else:
+        aapt = sdk_tool("aapt")
+        if aapt:
+            log("aapt package manifest")
+            r = run([aapt, "package", "-f", "-M", str(manifest_text), "-I", aj, "-F", str(out_apk)])
+            if r.returncode == 0:
+                binary_manifest = work / "AndroidManifest.bin"
+                with zipfile.ZipFile(out_apk) as z:
+                    binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
+                log("OK binary manifest via aapt (" + str(binary_manifest.stat().st_size) + " bytes)")
+                return binary_manifest
+            log("aapt failed, try androguard")
+
+    # androguard 方案：直接从原 APK 的二进制 AXML 修改 application android:name
+    log("Using androguard to modify binary AXML directly...")
+    try:
+        import androguard.core.axml
+    except ImportError:
+        log("installing androguard...")
+        r = run(["pip", "install", "-q", "androguard"])
+        if r.returncode != 0:
+            die("pip install androguard failed")
+        import androguard.core.axml
+    from androguard.core.axml import AXMLPrinter
+    import io
+
+    # 从原 input apk 读取二进制 manifest（注意：这里需要 input_apk 作为外部参数，但函数没有传，
+    # 实际后面会传 input_apk，所以这里应该从 decoded 的原始二进制？
+    # 但 apktool -s -r 已经解出了文本，如果文本清理失败，原始二进制在哪里？
+    # 实际上我们可以直接从 input.apk 提取二进制 manifest。
+    # 因此需要在这里访问全局 input_apk 路径。
+    global INPUT_APK
+    binary_path = Path(INPUT_APK)
+    if not binary_path.exists():
+        die("input apk not found for androguard")
+    with zipfile.ZipFile(binary_path) as z:
         if "AndroidManifest.xml" not in z.namelist():
-            die("aapt output has no AndroidManifest.xml")
-        binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
-    log("OK binary manifest via aapt (" + str(binary_manifest.stat().st_size) + " bytes)")
-    return binary_manifest
+            die("no AndroidManifest.xml in input apk")
+        raw_axml = z.read("AndroidManifest.xml")
+
+    # 解析二进制 AXML 为文本
+    printer = AXMLPrinter(raw_axml)
+    xml_text = printer.get_xml().decode('utf-8')
+    # 修改 application android:name
+    m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', xml_text)
+    if m:
+        old = m.group(1)
+        xml_text = xml_text.replace('android:name="' + old + '"', 'android:name="r.k.app"')
+        log(f"androguard changed name: {old} -> r.k.app")
+    else:
+        xml_text = re.sub(r'(<application\b)', r'\1 android:name="r.k.app"', xml_text, count=1)
+        log("androguard inserted r.k.app")
+
+    # 将修改后的文本重新编译为二进制 AXML：使用 aapt2 link（文本已干净，应该能成功）
+    out_apk2 = work / "manifest_bin2.apk"
+    tmp_manifest = work / "AndroidManifest_clean.xml"
+    tmp_manifest.write_text(xml_text, encoding="utf-8")
+    if aapt2:
+        r = run([aapt2, "link", "-o", str(out_apk2), "--manifest", str(tmp_manifest),
+                 "-I", aj, "--min-sdk-version", "21",
+                 "--target-sdk-version", "32",
+                 "--version-code", "1", "--version-name", "1.0"])
+        if r.returncode == 0:
+            binary_manifest = work / "AndroidManifest.bin"
+            with zipfile.ZipFile(out_apk2) as z:
+                binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
+            log("OK binary manifest via androguard+aapt2 (" + str(binary_manifest.stat().st_size) + " bytes)")
+            return binary_manifest
+        die("androguard modified manifest but aapt2 failed again")
+
+    # 如果 aapt2 不再可用，最后尝试直接用原始二进制 + 简单字符串替换（只适用于名字长度一致）
+    log("Fallback: raw string replace in binary AXML (only if length fits)")
+    # 不推荐，但保底
+    die("androguard path failed")
 
 def inject_classesN(input_apk, dex_file, so_dir, original_apk, work):
     """复制原 APK 所有文件（跳过旧签名），替换二进制 manifest，注入 classesN.dex+lib+assets"""

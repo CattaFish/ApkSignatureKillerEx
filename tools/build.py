@@ -249,8 +249,8 @@ def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
     # DEX header 字段偏移
     string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
     string_ids_off  = _struct.unpack_from("<I", dex_data, 0x3C)[0]
-    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x48)[0]
-    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x4C)[0]
+    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x40)[0]
+    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x44)[0]
     class_defs_size = _struct.unpack_from("<I", dex_data, 0x60)[0]
     class_defs_off  = _struct.unpack_from("<I", dex_data, 0x64)[0]
 

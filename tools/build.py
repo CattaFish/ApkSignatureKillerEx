@@ -274,9 +274,29 @@ def patch_tinker_application(input_apk, work):
     if r.returncode != 0:
         die("baksmali failed")
 
-    # 4. 修改 TinkerApplication.smali
+    # 4. 修改 TinkerApplication.smali（先诊断目录结构）
     ta_path = smali_dir / "com/tencent/tinker/loader/app/TinkerApplication.smali"
     if not ta_path.exists():
+        log("=== DIAG: baksmali output structure ===")
+        # 列出所有 smali 文件
+        all_smali = list(smali_dir.rglob("*.smali"))
+        log(f"total smali files: {len(all_smali)}")
+        # 找包含 Tinker 的
+        tinker_files = [f for f in all_smali if "Tinker" in f.name or "tinker" in str(f)]
+        log(f"files containing Tinker: {len(tinker_files)}")
+        for f in tinker_files[:20]:
+            log("  " + str(f.relative_to(smali_dir)))
+        # 找 com/tencent/tinker 目录
+        tinker_dir = smali_dir / "com" / "tencent" / "tinker"
+        if tinker_dir.exists():
+            log("=== com/tencent/tinker exists ===")
+            for f in list(tinker_dir.rglob("*.smali"))[:30]:
+                log("  " + str(f.relative_to(smali_dir)))
+        else:
+            log("=== com/tencent/tinker NOT FOUND ===")
+            # 打印顶层目录
+            for d in sorted(smali_dir.iterdir()):
+                log("  top: " + d.name)
         die("TinkerApplication.smali not found after baksmali")
     smali_text = ta_path.read_text(encoding="utf-8")
 

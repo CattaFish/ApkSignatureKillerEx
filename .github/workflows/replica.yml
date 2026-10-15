@@ -1,0 +1,120 @@
+name: Replica Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_url:
+        description: '输入APK下载链接（HTTP/HTTPS直链），必填'
+        required: true
+        default: ''
+      original_url:
+        description: '原版APK下载链接（用于提取签名+assets原包），留空则用 input_url 下载的 APK 自身'
+        required: false
+        default: ''
+      so_name:
+        description: 'native库名（不含lib前缀）'
+        required: false
+        default: 'k'
+      asset_dir:
+        description: 'assets子目录'
+        required: false
+        default: 'SginatareKiler'
+      asset_name:
+        description: '原包APK文件名'
+        required: false
+        default: '0rigih.apk'
+      files_dir:
+        description: '释放目录（相对 /data/data/<pkg>/）'
+        required: false
+        default: 'files/k'
+      output_name:
+        description: '输出APK文件名'
+        required: false
+        default: 'output.apk'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/build-tools" || true
+          ls "$ANDROID_HOME/ndk" || true
+          which aapt aapt2 d8 apksigner javac || true
+
+      - name: Download tools
+        run: |
+          mkdir -p tools
+          curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
+          ls -la tools/
+
+      - name: Download input APK from URL
+        env:
+          INPUT_URL: ${{ inputs.input_url }}
+        run: |
+          echo "Downloading input APK..."
+          curl -fL --retry 3 -o input.apk "$INPUT_URL" || { echo "download failed"; exit 1; }
+          ls -la input.apk
+          file input.apk || true
+
+      - name: Download original APK from URL (optional)
+        if: ${{ inputs.original_url != '' }}
+        env:
+          ORIGINAL_URL: ${{ inputs.original_url }}
+        run: |
+          echo "Downloading original APK..."
+          curl -fL --retry 3 -o original.apk "$ORIGINAL_URL" || { echo "download failed"; exit 1; }
+          ls -la original.apk
+          file original.apk || true
+          echo "ORIGINAL_APK=original.apk" >> $GITHUB_ENV
+        # 如果 original_url 没填，保持 ORIGINAL_APK=input.apk（自己当原包）
+      - name: Set defaults when original_url empty
+        if: ${{ inputs.original_url == '' }}
+        run: echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
+
+      - name: Run build
+        env:
+          INPUT_APK: input.apk
+          ORIGINAL_APK: ${{ env.ORIGINAL_APK }}
+          OUTPUT_APK: ${{ inputs.output_name }}
+          SO_NAME: ${{ inputs.so_name }}
+          ASSET_DIR: ${{ inputs.asset_dir }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+          FILES_DIR: ${{ inputs.files_dir }}
+        run: |
+          export ANDROID_NDK_HOME="$(ls -d $ANDROID_HOME/ndk/* | head -1)"
+          echo "NDK=$ANDROID_NDK_HOME"
+          echo "INPUT_APK=$INPUT_APK"
+          echo "ORIGINAL_APK=$ORIGINAL_APK"
+          echo "SO_NAME=$SO_NAME"
+          echo "ASSET_DIR=$ASSET_DIR"
+          echo "ASSET_NAME=$ASSET_NAME"
+          echo "FILES_DIR=$FILES_DIR"
+          echo "OUTPUT_APK=$OUTPUT_APK"
+          ls -la input.apk
+          if [ "$ORIGINAL_APK" = "input.apk" ]; then echo "Using input.apk as original"; fi
+          python3 -u tools/build.py 2>&1
+          echo "EXIT=$?"
+
+      - name: List results
+        run: |
+          ls -la output.apk 2>&1 || echo "no output.apk"
+          find . -name "*.apk" -not -path "./tools/*" 2>/dev/null
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: output.apk
+          if-no-files-found: ignore

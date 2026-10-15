@@ -294,14 +294,14 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
         for item in zin.infolist():
             if item.filename.startswith("META-INF/"):
                 continue
+            if item.filename == "AndroidManifest.xml":
+                continue  # 跳过旧的，最后只写一份修改后的
             zout.writestr(item, zin.read(item.filename))
-        log("copied original entries (skip META-INF)")
+        log("copied original entries (skip META-INF + old manifest)")
 
-        # 替换 manifest（先删旧条目再写，避免重复）
-        if "AndroidManifest.xml" in zout.namelist():
-            zout.open("AndroidManifest.xml", "w").close()
+        # 只写入一次修改后的 manifest
         zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
-        log("replaced AndroidManifest.xml")
+        log("wrote single AndroidManifest.xml")
 
         # 收集原始 dex 编号
         original_numbers = set()

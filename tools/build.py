@@ -62,30 +62,6 @@ def android_jar():
                     return str(p)
     die("android.jar not found")
 
-def get_axml_printer():
-    """Return AXMLPrinter class from androguard (compat import)."""
-    try:
-        from androguard.core.bytecodes.axml import AXMLPrinter
-        return AXMLPrinter
-    except ImportError:
-        try:
-            from androguard.core.axml import AXMLPrinter
-            return AXMLPrinter
-        except ImportError:
-            log("installing androguard...")
-            r = run(["pip", "install", "-q", "androguard"])
-            if r.returncode != 0:
-                die("pip install androguard failed")
-            try:
-                from androguard.core.bytecodes.axml import AXMLPrinter
-                return AXMLPrinter
-            except ImportError:
-                try:
-                    from androguard.core.axml import AXMLPrinter
-                    return AXMLPrinter
-                except ImportError:
-                    die("androguard import failed")
-
 def extract_signature(apk):
     log("Extract signature from " + str(apk))
     try:
@@ -237,20 +213,22 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
     """No apktool: copy zip entries, replace binary manifest, inject dex/so/assets."""
     log("=== inject (no-apktool) ===")
 
-    # 1. Extract binary manifest -> clean text via androguard
-    AXMLPrinter = get_axml_printer()
+    # 1. Extract binary manifest, modify directly via axml_modifier
+    import importlib.util
+    mod_path = ROOT / "tools" / "axml_modifier.py"
+    spec = importlib.util.spec_from_file_location("axml_modifier", mod_path)
+    axml_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(axml_mod)
+
     binary_manifest = work / "AndroidManifest.bin"
     with zipfile.ZipFile(input_apk) as z:
         if "AndroidManifest.xml" not in z.namelist():
             die("no AndroidManifest.xml in input apk")
         raw_axml = z.read("AndroidManifest.xml")
-    log("decoding binary AXML via androguard...")
-    printer = AXMLPrinter(raw_axml)
-    xml_bytes = printer.get_xml()
-    xml_text = xml_bytes.decode("utf-8", errors="replace")
-    log("manifest decoded, " + str(len(xml_text)) + " chars")
-    xml_text = modify_manifest_text(xml_text)
-    binary_manifest = compile_manifest_binary(xml_text, work)
+    log("modifying binary AXML directly...")
+    new_axml = axml_mod.modify_application_name(raw_axml, "r.k.app")
+    binary_manifest.write_bytes(new_axml)
+    log("OK binary manifest modified (" + str(len(new_axml)) + " bytes)")
 
     # 2. Build output APK
     output_apk = work / "injected.apk"

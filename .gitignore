@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 输入APK不提交，由 Actions 从 URL 下载
+input.apk
+*.apk

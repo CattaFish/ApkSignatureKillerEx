@@ -55,6 +55,15 @@ jobs:
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
           curl -L -o tools/smali.jar https://bitbucket.org/JesusFreke/smali/downloads/smali-2.5.2.jar
 
+      - name: Verify tools exist
+        run: |
+          pwd
+          ls -la tools/
+          echo "=== 检查 jar 文件头 ==="
+          head -c 4 tools/baksmali.jar | xxd
+          head -c 4 tools/smali.jar | xxd
+          file tools/baksmali.jar tools/smali.jar
+
       - name: Download input APK
         env:
           INPUT_URL: ${{ inputs.input_url }}

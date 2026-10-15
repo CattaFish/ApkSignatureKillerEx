@@ -297,7 +297,9 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
             zout.writestr(item, zin.read(item.filename))
         log("copied original entries (skip META-INF)")
 
-        # 替换 manifest
+        # 替换 manifest（先删旧条目再写，避免重复）
+        if "AndroidManifest.xml" in zout.namelist():
+            zout.open("AndroidManifest.xml", "w").close()
         zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
         log("replaced AndroidManifest.xml")
 

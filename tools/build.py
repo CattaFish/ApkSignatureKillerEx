@@ -240,6 +240,78 @@ def axml_replace_string(raw, old, new):
     raise ValueError("target string not found in AXML: " + old)
 
 
+import struct as _struct
+
+def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
+    """检查 dex 是否真正定义（class_defs）了 target_desc 这个类"""
+    if len(dex_data) < 0x70:
+        return False
+    # DEX header 字段偏移
+    string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
+    string_ids_off  = _struct.unpack_from("<I", dex_data, 0x3C)[0]
+    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x48)[0]
+    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x4C)[0]
+    class_defs_size = _struct.unpack_from("<I", dex_data, 0x60)[0]
+    class_defs_off  = _struct.unpack_from("<I", dex_data, 0x64)[0]
+
+    if string_ids_off == 0 or type_ids_off == 0 or class_defs_off == 0:
+        return False
+
+    def get_string(idx):
+        if idx >= string_ids_size:
+            return None
+        str_off = _struct.unpack_from("<I", dex_data, string_ids_off + idx * 4)[0]
+        p = str_off
+        # ULEB128 string length (we don't need it, skip to content)
+        while p < len(dex_data) and dex_data[p] & 0x80:
+            p += 1
+        p += 1  # skip last length byte
+        size = 0
+        shift = 0
+        while p < len(dex_data):
+            b = dex_data[p]
+            p += 1
+            size |= (b & 0x7F) << shift
+            if not (b & 0x80):
+                break
+            shift += 7
+        content = dex_data[p:p + size]
+        try:
+            return content.decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def get_type(idx):
+        if idx >= type_ids_size:
+            return None
+        tidx = _struct.unpack_from("<I", dex_data, type_ids_off + idx * 4)[0]
+        return get_string(tidx)
+
+    # 遍历 class_defs，检查 class_idx 对应的 type 描述符
+    for i in range(class_defs_size):
+        cls_idx = _struct.unpack_from("<I", dex_data, class_defs_off + i * 32)[0]
+        t = get_type(cls_idx)
+        if t == target_desc:
+            return True
+    return False
+
+
+def find_tinker_dex(input_apk, work):
+    """在 APK 所有 dex 中找出真正定义 TinkerApplication 的那个"""
+    target = "Lcom/tencent/tinker/loader/app/TinkerApplication;"
+    with zipfile.ZipFile(input_apk) as z:
+        for n in sorted(z.namelist()):
+            if not n.endswith(".dex"):
+                continue
+            data = z.read(n)
+            if dex_defines_class(data, target):
+                log("TinkerApplication DEFINED in: " + n)
+                dex_path = work / n
+                dex_path.write_bytes(data)
+                return n, dex_path
+    die("dex defining TinkerApplication not found")
+
+
 def patch_tinker_application(input_apk, work):
     """从 classes5.dex 提取 TinkerApplication，改 super 为 r.k.app + getTinkerFlags 返回 0，再写回。"""
     log("=== patch TinkerApplication ===")
@@ -249,23 +321,8 @@ def patch_tinker_application(input_apk, work):
     if not baksmali_jar.exists() or not smali_jar.exists():
         die("baksmali.jar or smali.jar not found in tools/")
 
-    # 1. 找到含 TinkerApplication 的 dex
-    target_dex = None
-    with zipfile.ZipFile(input_apk) as z:
-        for n in z.namelist():
-            if n.endswith(".dex"):
-                data = z.read(n)
-                if b"Lcom/tencent/tinker/loader/app/TinkerApplication;" in data:
-                    target_dex = n
-                    log("TinkerApplication found in: " + n)
-                    break
-        if not target_dex:
-            die("TinkerApplication not found in any dex")
-
-        # 2. 提取该 dex 到工作目录
-        dex_path = work / target_dex
-        with zipfile.ZipFile(input_apk) as z:
-            dex_path.write_bytes(z.read(target_dex))
+    # 1. 精确定位定义 TinkerApplication 的 dex（通过 class_defs 解析）
+    target_dex, dex_path = find_tinker_dex(input_apk, work)
 
     # 3. baksmali 反编译
     smali_dir = work / "tinker_smali"

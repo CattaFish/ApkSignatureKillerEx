@@ -62,12 +62,31 @@ def android_jar():
 
 def extract_signature(apk):
     log("Extract signature from " + str(apk))
-    with zipfile.ZipFile(apk) as z:
-        for n in z.namelist():
-            if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n):
-                b = base64.b64encode(z.read(n)).decode()
-                return re.sub(r"\s+", "", b)
-    die("No signature file in " + str(apk))
+
+    # 1. 优先尝试 v1 签名（META-INF/*.RSA）
+    try:
+        with zipfile.ZipFile(apk) as z:
+            for n in z.namelist():
+                if re.match(r"META-INF/.*\.(RSA|DSA|EC)$", n):
+                    b = base64.b64encode(z.read(n)).decode()
+                    return re.sub(r"\s+", "", b)
+    except Exception as e:
+        log("v1 signature extract failed: " + str(e))
+
+    # 2. 失败则用 keytool 读取 APK 整体签名证书（支持 v1/v2/v3）
+    log("Try keytool -printcert -jarfile -rfc ...")
+    r = run(["keytool", "-printcert", "-jarfile", str(apk), "-rfc"], capture=True)
+    if r.returncode != 0:
+        die("keytool failed: " + (r.stderr or r.stdout or ""))
+
+    out = r.stdout or ""
+    m = re.search(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", out, re.DOTALL)
+    if not m:
+        die("No certificate found in keytool output")
+    b64 = m.group(1).replace("\n", "").replace("\r", "").strip()
+    if not b64:
+        die("Empty certificate in keytool output")
+    return b64
 
 def compile_java(out):
     log("Compile Java -> dex")

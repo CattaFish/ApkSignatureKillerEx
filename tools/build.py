@@ -3,7 +3,7 @@
 import os, sys, re, shutil, subprocess, tempfile, zipfile, base64, traceback
 from pathlib import Path
 
-print("=== build.py loaded (classesN inject mode) ===", flush=True)
+print("=== build.py loaded (aapt2 manifest + zipfile copy mode) ===", flush=True)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -62,8 +62,7 @@ def android_jar():
 
 def extract_signature(apk):
     log("Extract signature from " + str(apk))
-
-    # 1. 优先尝试 v1 签名（META-INF/*.RSA）
+    # 1) v1: META-INF/*.RSA|DSA|EC
     try:
         with zipfile.ZipFile(apk) as z:
             for n in z.namelist():
@@ -71,22 +70,16 @@ def extract_signature(apk):
                     b = base64.b64encode(z.read(n)).decode()
                     return re.sub(r"\s+", "", b)
     except Exception as e:
-        log("v1 signature extract failed: " + str(e))
-
-    # 2. 失败则用 keytool 读取 APK 整体签名证书（支持 v1/v2/v3）
-    log("Try keytool -printcert -jarfile -rfc ...")
+        log("v1 extract failed: " + str(e))
+    # 2) v2/v3: keytool -printcert -jarfile -rfc
+    log("keytool fallback...")
     r = run(["keytool", "-printcert", "-jarfile", str(apk), "-rfc"], capture=True)
     if r.returncode != 0:
-        die("keytool failed: " + (r.stderr or r.stdout or ""))
-
-    out = r.stdout or ""
-    m = re.search(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", out, re.DOTALL)
+        die("keytool failed")
+    m = re.search(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", r.stdout or "", re.DOTALL)
     if not m:
-        die("No certificate found in keytool output")
-    b64 = m.group(1).replace("\n", "").replace("\r", "").strip()
-    if not b64:
-        die("Empty certificate in keytool output")
-    return b64
+        die("no cert in keytool output")
+    return m.group(1).replace("\n", "").replace("\r", "").strip()
 
 def compile_java(out):
     log("Compile Java -> dex")
@@ -98,16 +91,13 @@ def compile_java(out):
     files = list(src_dir.rglob("*.java"))
     if not files:
         die("no java files under src/java/r/k")
-    log("javac " + str(len(files)) + " files...")
-    cmd = ["javac", "-source", "1.8", "-target", "1.8",
-           "-bootclasspath", aj,
-           "-classpath", str(stub_dir),
-           "-sourcepath", str(stub_dir),
-           "-d", str(cls)] + files
-    r = run(cmd)
+    r = run(["javac", "-source", "1.8", "-target", "1.8",
+             "-bootclasspath", aj,
+             "-classpath", str(stub_dir),
+             "-sourcepath", str(stub_dir),
+             "-d", str(cls)] + files)
     if r.returncode != 0:
         die("javac failed")
-    # 移除 stub 产物
     for stub_pkg in ("sun", "dalvik"):
         d = cls / stub_pkg
         if d.exists():
@@ -118,9 +108,7 @@ def compile_java(out):
     d8 = sdk_tool("d8")
     if not d8:
         die("d8 not found")
-    log("d8 -> classes.dex")
-    cmd = [d8, "--min-api", "21", "--lib", aj, "--output", str(out)] + classes
-    r = run(cmd)
+    r = run([d8, "--min-api", "21", "--lib", aj, "--output", str(out)] + classes)
     if r.returncode != 0:
         die("d8 failed")
     dex_out = out / "classes.dex"
@@ -161,10 +149,9 @@ def build_native(out):
         bd = out / ("nb_" + abi)
         bd.mkdir(parents=True, exist_ok=True)
         log("NDK build " + abi)
-        cmd = ["cmake", "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
-               "-DANDROID_ABI=" + abi, "-DANDROID_PLATFORM=android-21",
-               "-DCMAKE_BUILD_TYPE=Release", "-S", str(nat), "-B", str(bd)]
-        r = run(cmd)
+        r = run(["cmake", "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
+                 "-DANDROID_ABI=" + abi, "-DANDROID_PLATFORM=android-21",
+                 "-DCMAKE_BUILD_TYPE=Release", "-S", str(nat), "-B", str(bd)])
         if r.returncode != 0:
             log("cmake configure fail " + abi)
             continue
@@ -184,82 +171,136 @@ def build_native(out):
     return so_dir
 
 def patch_manifest(decoded_dir):
-    """修改 AndroidManifest.xml，设置 android:name='r.k.app'"""
+    """修改 AndroidManifest.xml，把 application android:name 设为 r.k.app"""
     mp = decoded_dir / "AndroidManifest.xml"
+    if not mp.exists():
+        die("AndroidManifest.xml not found after apktool decode")
     txt = mp.read_text(encoding="utf-8", errors="ignore")
     m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', txt)
     if m:
-        old_name = m.group(1)
-        txt = txt.replace('android:name="' + old_name + '"', 'android:name="r.k.app"')
-        log(f"Application name replaced: {old_name} -> r.k.app")
+        old = m.group(1)
+        txt = txt.replace('android:name="' + old + '"', 'android:name="r.k.app"')
+        log(f"Application name: {old} -> r.k.app")
     else:
         txt = re.sub(r'(<application\b)', r'\1 android:name="r.k.app"', txt, count=1)
         log("Application name inserted: r.k.app")
     mp.write_text(txt, encoding="utf-8")
 
-def inject_classesN(input_apk, output_unsigned, dex_file, so_dir, original_apk, work):
-    """核心：不再 apktool d/b 全量解包，
-    而是 apktool d -s 只解 Manifest（不动 dex），
-    然后直接把 classesN.dex / lib / assets 塞进 APK。"""
-    log("=== classesN inject mode ===")
+def compile_manifest_binary(decoded_dir, work):
+    """用 aapt2/aapt 把文本 Manifest 编译成二进制，返回 AndroidManifest.bin 路径"""
+    manifest_text = decoded_dir / "AndroidManifest.xml"
+    aj = android_jar()
+    out_apk = work / "manifest_bin.apk"
+    aapt2 = sdk_tool("aapt2")
+    if aapt2:
+        log("aapt2 link manifest")
+        r = run([aapt2, "link",
+                 "-o", str(out_apk),
+                 "--manifest", str(manifest_text),
+                 "-I", aj,
+                 "--min-sdk-version", "21",
+                 "--target-sdk-version", "32",
+                 "--version-code", "1",
+                 "--version-name", "1.0"])
+        if r.returncode == 0:
+            bin_apk = out_apk
+            binary_manifest = work / "AndroidManifest.bin"
+            with zipfile.ZipFile(bin_apk) as z:
+                if "AndroidManifest.xml" not in z.namelist():
+                    die("aapt2 output has no AndroidManifest.xml")
+                binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
+            log("OK binary manifest via aapt2 (" + str(binary_manifest.stat().st_size) + " bytes)")
+            return binary_manifest
+        log("aapt2 failed, fallback to aapt")
+    aapt = sdk_tool("aapt")
+    if not aapt:
+        die("Neither aapt2 nor aapt found")
+    log("aapt package manifest")
+    r = run([aapt, "package", "-f",
+             "-M", str(manifest_text),
+             "-I", aj,
+             "-F", str(out_apk)])
+    if r.returncode != 0:
+        die("aapt manifest compile failed")
+    binary_manifest = work / "AndroidManifest.bin"
+    with zipfile.ZipFile(out_apk) as z:
+        if "AndroidManifest.xml" not in z.namelist():
+            die("aapt output has no AndroidManifest.xml")
+        binary_manifest.write_bytes(z.read("AndroidManifest.xml"))
+    log("OK binary manifest via aapt (" + str(binary_manifest.stat().st_size) + " bytes)")
+    return binary_manifest
 
-    # 1. apktool d -s 只解 manifest 和资源
+def inject_classesN(input_apk, dex_file, so_dir, original_apk, work):
+    """复制原 APK 所有文件（跳过旧签名），替换二进制 manifest，注入 classesN.dex+lib+assets"""
+    log("=== inject: copy original + replace manifest + inject ===")
+
+    # 1. apktool d -s -r 仅解文本 manifest/资源（不碰 dex）
     dec = work / "decoded"
     dec.mkdir(parents=True, exist_ok=True)
     r = run(["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-r", "-f", "-o", str(dec), str(input_apk)])
     if r.returncode != 0:
-        die("apktool d -s failed (manifest/res decode)")
+        die("apktool d -s -r failed")
 
-    # 2. 改 Manifest
+    # 2. 修改文本 manifest
     patch_manifest(dec)
 
-    # 3. apktool b 重打包（不含 dex，但会把原资源/manifest 编回来）
-    #    注意：-s 模式下，apktool b 不会重新生成 dex，原 dex 会怎样？
-    #    实际上 apktool d -s 后，decoded 里没有 dex 文件，build 时不会生成 dex，
-    #    所以需要手动把原 dex 从 input.apk 复制回 output。
-    repacked = work / "repacked.apk"
-    r = run(["java", "-jar", str(APKTOOL_JAR), "b", "--use-aapt2", "-o", str(repacked), str(dec)])
-    if r.returncode != 0:
-        die("apktool b failed")
-    log("repacked (manifest/res only): " + str(repacked.stat().st_size) + " bytes")
+    # 3. 编译二进制 manifest
+    binary_manifest = compile_manifest_binary(dec, work)
 
-    # 4. 把原 APK 的 dex 全部复制进 repacked.apk
-    log("Copy original dex files into output...")
-    with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(repacked, "a") as zout:
-        # 先列出已有 dex
-        existing = set(zout.namelist())
-        for n in zin.namelist():
-            if n.endswith(".dex") and n not in existing:
-                zout.writestr(n, zin.read(n))
-        # 5. 注入编译好的 dex 为 classes20.dex
-        next_idx = 2
-        while f"classes{next_idx}.dex" in existing or f"classes{next_idx}.dex" not in [x for x in zin.namelist() if x.endswith('.dex')]:
-            # 找下一个空余编号
-            all_dex = set(x for x in zin.namelist() if x.endswith(".dex"))
-            if f"classes{next_idx}.dex" not in all_dex and f"classes{next_idx}.dex" not in zout.namelist():
+    # 4. 构造新 APK：复制全部原文件（跳过 META-INF 签名） + 替换 manifest + 注入
+    output_apk = work / "injected.apk"
+    with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(output_apk, "w") as zout:
+        for item in zin.infolist():
+            if item.filename.startswith("META-INF/"):
+                continue
+            zout.writestr(item, zin.read(item.filename))
+        log("copied original entries (skip META-INF)")
+
+        # 5. 替换二进制 manifest
+        zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
+        log("replaced AndroidManifest.xml")
+
+        # 6. 收集原始 dex 编号
+        original_numbers = set()
+        for n in zout.namelist():
+            m = re.fullmatch(r"classes(\d*)\.dex", n)
+            if m:
+                num = int(m.group(1)) if m.group(1) else 1
+                original_numbers.add(num)
+        log(f"Original dex numbers: {sorted(original_numbers)}")
+
+        # 7. 动态选择下一个空闲 classesN.dex
+        next_num = 1
+        while True:
+            name = "classes.dex" if next_num == 1 else f"classes{next_num}.dex"
+            if next_num not in original_numbers and name not in zout.namelist():
                 break
-            next_idx += 1
-        inject_name = f"classes{next_idx}.dex"
-        log(f"Inject dex as {inject_name}")
+            next_num += 1
+        if next_num == 1:
+            next_num = 2
+            while f"classes{next_num}.dex" in zout.namelist():
+                next_num += 1
+        inject_name = f"classes{next_num}.dex"
+        log("Auto-selected new dex name: " + inject_name)
         zout.writestr(inject_name, dex_file.read_bytes())
 
-        # 6. 注入 native lib
+        # 8. 注入 native lib
         if so_dir:
             for abi in so_dir.iterdir():
                 if abi.is_dir():
                     for so in abi.glob("*.so"):
-                        arc = f"lib/{abi.name}/{so.name}"
+                        arc = "lib/" + abi.name + "/" + so.name
                         zout.writestr(arc, so.read_bytes())
-                        log(f"inject {arc}")
+                        log("inject " + arc)
 
-        # 7. 注入 assets 原包
-        asset_arc = f"assets/{ASSET_DIR}/{ASSET_NAME}"
+        # 9. 注入 assets 原包
         if original_apk:
+            asset_arc = "assets/" + ASSET_DIR + "/" + ASSET_NAME
             zout.writestr(asset_arc, original_apk.read_bytes())
-            log(f"inject {asset_arc} <- {original_apk.name}")
+            log("inject " + asset_arc + " <- " + original_apk.name)
 
-    log("injected APK: " + str(repacked.stat().st_size) + " bytes")
-    return repacked
+    log("injected APK: " + str(output_apk.stat().st_size) + " bytes")
+    return output_apk
 
 def sign(unsigned, final):
     log("apksigner sign")
@@ -304,6 +345,7 @@ def main():
     if not TARGET_PKG:
         die("cannot detect package, set TARGET_PKG env")
     log("Package    : " + TARGET_PKG)
+
     with tempfile.TemporaryDirectory(prefix="apksig_", dir=str(ROOT)) as tmp:
         work = Path(tmp)
         java_src = work / "java_src"
@@ -317,13 +359,14 @@ def main():
         t = t.replace("%%FILES_DIR%%", FILES_DIR)
         ap.write_text(t, encoding="utf-8")
         log("Java template updated")
+
         dex_file = compile_java(work)
         so_dir = None
         try:
             so_dir = build_native(work)
         except Exception as e:
             log("native skip: " + str(e))
-        unsigned = inject_classesN(input_apk, original, dex_file, so_dir, original, work)
+        unsigned = inject_classesN(input_apk, dex_file, so_dir, original, work)
         final = ROOT / OUTPUT_APK
         sign(unsigned, final)
     log("BUILD SUCCESS: " + str(ROOT / OUTPUT_APK))

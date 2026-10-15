@@ -74,33 +74,6 @@ jobs:
         if: ${{ inputs.original_url == '' }}
         run: echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
 
-      - name: Test apkanalyzer
-        run: |
-          which apkanalyzer || find "$ANDROID_HOME" -name apkanalyzer -type f 2>/dev/null | head -5
-          APK=$(which apkanalyzer 2>/dev/null || find "$ANDROID_HOME" -name apkanalyzer -type f 2>/dev/null | head -1)
-          echo "APKANALYZER=$APK"
-          if [ -n "$APK" ]; then
-            "$APK" manifest print input.apk | head -100
-          else
-            echo "apkanalyzer not found"
-            ls "$ANDROID_HOME/cmdline-tools" 2>/dev/null || true
-          fi
-
-      - name: Dump full manifest
-        run: |
-          APK=/usr/local/lib/android/sdk/cmdline-tools/latest/bin/apkanalyzer
-          "$APK" manifest print input.apk | tee manifest_full.txt
-          echo "===== application 部分 ====="
-          "$APK" manifest print input.apk | grep -A25 "<application" || echo "no <application> tag found"
-
-      - name: Upload manifest dump
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: manifest-dump
-          path: manifest_full.txt
-          if-no-files-found: ignore
-
       - name: Run build
         env:
           INPUT_APK: input.apk

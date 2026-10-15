@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       input_url:
-        description: '输入APK直链（HTTP/HTTPS）'
+        description: '要修改的APK直链（修改版）'
         required: true
+      original_url:
+        description: '原版APK直链（提取签名+作为assets原包），留空则用 input 自己'
+        required: false
+        default: ''
       so_name:
         description: 'native库名（不含lib前缀）'
         required: false
@@ -48,17 +52,32 @@ jobs:
           curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
 
-      - name: Download APK
+      - name: Download input APK
         env:
           INPUT_URL: ${{ inputs.input_url }}
         run: |
-          echo "Downloading APK..."
+          echo "Downloading input APK..."
           curl -fL --retry 3 -o input.apk "$INPUT_URL" || { echo "download failed"; exit 1; }
           ls -la input.apk
+
+      - name: Download original APK (if provided)
+        if: ${{ inputs.original_url != '' }}
+        env:
+          ORIGINAL_URL: ${{ inputs.original_url }}
+        run: |
+          echo "Downloading original APK..."
+          curl -fL --retry 3 -o original.apk "$ORIGINAL_URL" || { echo "download failed"; exit 1; }
+          ls -la original.apk
+          echo "ORIGINAL_APK=original.apk" >> $GITHUB_ENV
+
+      - name: Set original to input when not provided
+        if: ${{ inputs.original_url == '' }}
+        run: echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
 
       - name: Run build
         env:
           INPUT_APK: input.apk
+          ORIGINAL_APK: ${{ env.ORIGINAL_APK }}
           OUTPUT_APK: ${{ inputs.output_name }}
           SO_NAME: ${{ inputs.so_name }}
           ASSET_DIR: ${{ inputs.asset_dir }}
@@ -66,6 +85,8 @@ jobs:
           FILES_DIR: ${{ inputs.files_dir }}
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
+          echo "ORIGINAL_APK=$ORIGINAL_APK"
+          ls -la input.apk original.apk 2>&1 || true
           python3 -u tools/build.py 2>&1
           echo "EXIT=$?"
 

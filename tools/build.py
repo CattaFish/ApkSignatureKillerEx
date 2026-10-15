@@ -240,70 +240,119 @@ def axml_replace_string(raw, old, new):
     raise ValueError("target string not found in AXML: " + old)
 
 
-def inject(input_apk, dex_file, so_dir, original_apk, work):
-    """复制原 APK，替换 application name 为 r.k.app，注入 dex/so/assets"""
-    log("=== inject (binary string replace) ===")
+def patch_tinker_application(input_apk, work):
+    """从 classes5.dex 提取 TinkerApplication，改 super 为 r.k.app + getTinkerFlags 返回 0，再写回。"""
+    log("=== patch TinkerApplication ===")
 
-    # 1. 用 apkanalyzer 获取干净文本 manifest，提取原始 application name
-    apkanalyzer = "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/apkanalyzer"
-    if not Path(apkanalyzer).exists():
-        apkanalyzer = sdk_tool("apkanalyzer")
-    if not apkanalyzer:
-        die("apkanalyzer not found")
-    r = run([apkanalyzer, "manifest", "print", str(input_apk)], capture=True)
-    if r.returncode != 0:
-        die("apkanalyzer manifest print failed")
-    xml_text = r.stdout or ""
-    log("manifest decoded, " + str(len(xml_text)) + " chars")
+    baksmali_jar = ROOT / "tools/baksmali.jar"
+    smali_jar = ROOT / "tools/smali.jar"
+    if not baksmali_jar.exists() or not smali_jar.exists():
+        die("baksmali.jar or smali.jar not found in tools/")
 
-    # 提取 application android:name（优先）
-    m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', xml_text)
-    old_app_name = m.group(1) if m else None
-    log("original application name: " + str(old_app_name))
-
-    # 如果 application 没有 android:name，则改 appComponentFactory
-    target_bytes = None
-    if old_app_name:
-        target_bytes = old_app_name.encode('utf-8')
-    else:
-        m2 = re.search(r'<application\b[^>]*\bandroid:appComponentFactory="([^"]+)"', xml_text)
-        if m2:
-            old_app_name = m2.group(1)
-            log("application has no android:name, will patch appComponentFactory: " + old_app_name)
-        else:
-            die("application has neither android:name nor appComponentFactory")
-
-    # 2. 读取原始二进制 AndroidManifest.xml
+    # 1. 找到含 TinkerApplication 的 dex
+    target_dex = None
     with zipfile.ZipFile(input_apk) as z:
-        if "AndroidManifest.xml" not in z.namelist():
-            die("no AndroidManifest.xml in input apk")
-        raw_axml = z.read("AndroidManifest.xml")
+        for n in z.namelist():
+            if n.endswith(".dex"):
+                data = z.read(n)
+                if b"Lcom/tencent/tinker/loader/app/TinkerApplication;" in data:
+                    target_dex = n
+                    log("TinkerApplication found in: " + n)
+                    break
+        if not target_dex:
+            die("TinkerApplication not found in any dex")
 
-    # 3. 二进制替换
-    new_value = "r.k.app" if old_app_name else "r.k.AppComponentFactory"
-    log("replacing '" + old_app_name + "' -> '" + new_value + "'")
-    new_axml = axml_replace_string(raw_axml, old_app_name, new_value)
+        # 2. 提取该 dex 到工作目录
+        dex_path = work / target_dex
+        with zipfile.ZipFile(input_apk) as z:
+            dex_path.write_bytes(z.read(target_dex))
 
-    binary_manifest = work / "AndroidManifest.bin"
-    binary_manifest.write_bytes(new_axml)
-    log("OK binary manifest patched (" + str(len(new_axml)) + " bytes)")
+    # 3. baksmali 反编译
+    smali_dir = work / "tinker_smali"
+    smali_dir.mkdir(parents=True, exist_ok=True)
+    r = run(["java", "-jar", str(baksmali_jar), "d", str(dex_path), "-o", str(smali_dir)])
+    if r.returncode != 0:
+        die("baksmali failed")
 
-    # 4. 构造输出 APK
+    # 4. 修改 TinkerApplication.smali
+    ta_path = smali_dir / "com/tencent/tinker/loader/app/TinkerApplication.smali"
+    if not ta_path.exists():
+        die("TinkerApplication.smali not found after baksmali")
+    smali_text = ta_path.read_text(encoding="utf-8")
+
+    # 4a. 改 super
+    if ".super Landroid/app/Application;" not in smali_text:
+        log("WARN: TinkerApplication.super is not Application, check content:")
+        for line in smali_text.splitlines()[:5]:
+            log("  " + line)
+    smali_text = smali_text.replace(
+        ".super Landroid/app/Application;",
+        ".super Lr/k/app;"
+    )
+
+    # 4b. 改 getTinkerFlags 返回 0
+    old_flags = """.method public getTinkerFlags()I
+    .registers 2
+
+    iget v0, p0, Lcom/tencent/tinker/loader/app/TinkerApplication;->tinkerFlags:I
+
+    return v0
+
+.end method"""
+    new_flags = """.method public getTinkerFlags()I
+    .registers 1
+
+    const/4 p0, 0x0
+
+    return p0
+
+.end method"""
+    if old_flags in smali_text:
+        smali_text = smali_text.replace(old_flags, new_flags)
+        log("getTinkerFlags patched to return 0")
+    else:
+        log("WARN: getTinkerFlags pattern not found, check method:")
+        m = re.search(r'\.method public getTinkerFlags\(\)I.*?\.end method', smali_text, re.DOTALL)
+        if m:
+            log(m.group(0))
+        else:
+            log("getTinkerFlags method not found at all")
+
+    ta_path.write_text(smali_text, encoding="utf-8")
+    log("TinkerApplication.smali patched")
+
+    # 5. smali 重新编译成 dex（新文件名 classes_patched.dex）
+    patched_dex = work / "classes_patched.dex"
+    r = run(["java", "-jar", str(smali_jar), "a", str(smali_dir), "-o", str(patched_dex)])
+    if r.returncode != 0:
+        die("smali assemble failed")
+    log("patched dex: " + str(patched_dex.stat().st_size) + " bytes")
+    return target_dex, patched_dex
+
+
+def inject(input_apk, dex_file, so_dir, original_apk, work):
+    """复制原 APK，patch TinkerApplication，注入 r.k.app dex + libk.so + assets，不修改 manifest。"""
+    log("=== inject (TinkerApplication patch mode) ===")
+
+    # 1. patch TinkerApplication
+    target_dex_name, patched_dex = patch_tinker_application(input_apk, work)
+
+    # 2. 构造输出 APK
     output_apk = work / "injected.apk"
     with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(output_apk, "w") as zout:
+        # 复制全部条目，跳过 META-INF 签名
         for item in zin.infolist():
             if item.filename.startswith("META-INF/"):
                 continue
-            if item.filename == "AndroidManifest.xml":
-                continue  # 跳过旧的，最后只写一份修改后的
-            zout.writestr(item, zin.read(item.filename))
-        log("copied original entries (skip META-INF + old manifest)")
+            # 替换被 patch 的 dex
+            if item.filename == target_dex_name:
+                zout.writestr(item, patched_dex.read_bytes())
+                log("replaced " + target_dex_name + " with patched version")
+            else:
+                zout.writestr(item, zin.read(item.filename))
+        log("copied original entries (skip META-INF)")
 
-        # 只写入一次修改后的 manifest
-        zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
-        log("wrote single AndroidManifest.xml")
-
-        # 收集原始 dex 编号
+        # 3. 收集原始 dex 编号
         original_numbers = set()
         for n in zout.namelist():
             mm = re.fullmatch(r"classes(\d*)\.dex", n)
@@ -312,7 +361,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
                 original_numbers.add(num)
         log(f"Original dex numbers: {sorted(original_numbers)}")
 
-        # 动态选下一个空闲 classesN.dex
+        # 4. 动态挑下一个空闲 classesN.dex
         next_num = 1
         while True:
             name = "classes.dex" if next_num == 1 else f"classes{next_num}.dex"
@@ -327,7 +376,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
         log("Auto-selected new dex name: " + inject_name)
         zout.writestr(inject_name, dex_file.read_bytes())
 
-        # 注入 native lib
+        # 5. 注入 native lib
         if so_dir:
             for abi in so_dir.iterdir():
                 if abi.is_dir():
@@ -336,7 +385,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
                         zout.writestr(arc, so.read_bytes())
                         log("inject " + arc)
 
-        # 注入 assets 原包
+        # 6. 注入 assets 原包
         if original_apk:
             asset_arc = "assets/" + ASSET_DIR + "/" + ASSET_NAME
             zout.writestr(asset_arc, original_apk.read_bytes())

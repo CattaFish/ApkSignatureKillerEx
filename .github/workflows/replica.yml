@@ -86,6 +86,21 @@ jobs:
             ls "$ANDROID_HOME/cmdline-tools" 2>/dev/null || true
           fi
 
+      - name: Dump full manifest
+        run: |
+          APK=/usr/local/lib/android/sdk/cmdline-tools/latest/bin/apkanalyzer
+          "$APK" manifest print input.apk | tee manifest_full.txt
+          echo "===== application 部分 ====="
+          "$APK" manifest print input.apk | grep -A25 "<application" || echo "no <application> tag found"
+
+      - name: Upload manifest dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-dump
+          path: manifest_full.txt
+          if-no-files-found: ignore
+
       - name: Run build
         env:
           INPUT_APK: input.apk

@@ -46,52 +46,38 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Download tools
+      - name: Download tools (unique)
         run: |
           mkdir -p tools
           curl -L -o tools/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
           curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
           curl -L -o tools/smali.jar https://bitbucket.org/JesusFreke/smali/downloads/smali-2.5.2.jar
-          curl -L -o tools/baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
-          curl -L -o tools/smali.jar https://bitbucket.org/JesusFreke/smali/downloads/smali-2.5.2.jar
+          ls -la tools/
+          file tools/*.jar
 
       - name: Verify tools exist
         run: |
-          pwd
           ls -la tools/
-          echo "=== 检查 jar 文件头 ==="
-          head -c 4 tools/baksmali.jar | xxd
-          head -c 4 tools/smali.jar | xxd
-          file tools/baksmali.jar tools/smali.jar
-
-      - name: Verify tools exist
-        run: |
-          pwd
-          ls -la tools/
-          echo "=== 检查 jar 文件头 ==="
-          head -c 4 tools/baksmali.jar | xxd
-          head -c 4 tools/smali.jar | xxd
-          file tools/baksmali.jar tools/smali.jar
+          test -f tools/baksmali.jar && echo "baksmali OK" || echo "baksmali MISSING"
+          test -f tools/smali.jar && echo "smali OK" || echo "smali MISSING"
+          test -f tools/apktool.jar && echo "apktool OK" || echo "apktool MISSING"
 
       - name: Download input APK
         env:
           INPUT_URL: ${{ inputs.input_url }}
         run: |
-          echo "Downloading input APK..."
-          curl -fL --retry 3 -o input.apk "$INPUT_URL" || { echo "download failed"; exit 1; }
+          curl -fL --retry 3 -o input.apk "$INPUT_URL" || { echo "input download failed"; exit 1; }
           ls -la input.apk
 
-      - name: Download original APK (if provided)
+      - name: Download original APK
         if: ${{ inputs.original_url != '' }}
         env:
           ORIGINAL_URL: ${{ inputs.original_url }}
         run: |
-          echo "Downloading original APK..."
-          curl -fL --retry 3 -o original.apk "$ORIGINAL_URL" || { echo "download failed"; exit 1; }
-          ls -la original.apk
+          curl -fL --retry 3 -o original.apk "$ORIGINAL_URL" || { echo "original download failed"; exit 1; }
           echo "ORIGINAL_APK=original.apk" >> $GITHUB_ENV
 
-      - name: Set original to input when not provided
+      - name: Set original to input
         if: ${{ inputs.original_url == '' }}
         run: echo "ORIGINAL_APK=input.apk" >> $GITHUB_ENV
 
@@ -106,8 +92,9 @@ jobs:
           FILES_DIR: ${{ inputs.files_dir }}
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
-          echo "ORIGINAL_APK=$ORIGINAL_APK"
           ls -la input.apk original.apk 2>&1 || true
+          echo "=== build.py location ==="
+          ls -la tools/build.py
           python3 -u tools/build.py 2>&1
           echo "EXIT=$?"
 

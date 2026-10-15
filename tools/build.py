@@ -209,50 +209,108 @@ def compile_manifest_binary(xml_text, work):
     log("OK binary manifest (" + str(binary_manifest.stat().st_size) + " bytes)")
     return binary_manifest
 
+def axml_replace_string(raw, old, new):
+    """在 AXML 字符串池中原地替换字符串（NUL 终止，长度可短不可长）"""
+    # 尝试 UTF-8 池
+    old_b = old.encode('utf-8')
+    idx = raw.find(old_b)
+    if idx != -1:
+        new_b = new.encode('utf-8')
+        if len(new_b) > len(old_b):
+            raise ValueError("new string longer than old (utf8)")
+        buf = bytearray(raw)
+        buf[idx:idx+len(new_b)] = new_b
+        # 剩余全部填 0
+        for i in range(idx + len(new_b), idx + len(old_b)):
+            buf[i] = 0
+        return bytes(buf)
+    # 尝试 UTF-16 池
+    old_16 = old.encode('utf-16-le')
+    idx16 = raw.find(old_16)
+    if idx16 != -1:
+        new_16 = new.encode('utf-16-le')
+        if len(new_16) > len(old_16):
+            raise ValueError("new string longer than old (utf16)")
+        buf = bytearray(raw)
+        buf[idx16:idx16+len(new_16)] = new_16
+        # 剩余填 0（按 2 字节）
+        for i in range(idx16 + len(new_16), idx16 + len(old_16)):
+            buf[i] = 0
+        return bytes(buf)
+    raise ValueError("target string not found in AXML: " + old)
+
+
 def inject(input_apk, dex_file, so_dir, original_apk, work):
-    """No apktool: copy zip entries, replace binary manifest, inject dex/so/assets."""
-    log("=== inject (no-apktool) ===")
+    """复制原 APK，替换 application name 为 r.k.app，注入 dex/so/assets"""
+    log("=== inject (binary string replace) ===")
 
-    # 1. Extract binary manifest, modify directly via axml_modifier
-    import importlib.util
-    mod_path = ROOT / "tools" / "axml_modifier.py"
-    spec = importlib.util.spec_from_file_location("axml_modifier", mod_path)
-    axml_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(axml_mod)
+    # 1. 用 apkanalyzer 获取干净文本 manifest，提取原始 application name
+    apkanalyzer = "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/apkanalyzer"
+    if not Path(apkanalyzer).exists():
+        apkanalyzer = sdk_tool("apkanalyzer")
+    if not apkanalyzer:
+        die("apkanalyzer not found")
+    r = run([apkanalyzer, "manifest", "print", str(input_apk)], capture=True)
+    if r.returncode != 0:
+        die("apkanalyzer manifest print failed")
+    xml_text = r.stdout or ""
+    log("manifest decoded, " + str(len(xml_text)) + " chars")
 
-    binary_manifest = work / "AndroidManifest.bin"
+    # 提取 application android:name（优先）
+    m = re.search(r'<application\b[^>]*\bandroid:name="([^"]+)"', xml_text)
+    old_app_name = m.group(1) if m else None
+    log("original application name: " + str(old_app_name))
+
+    # 如果 application 没有 android:name，则改 appComponentFactory
+    target_bytes = None
+    if old_app_name:
+        target_bytes = old_app_name.encode('utf-8')
+    else:
+        m2 = re.search(r'<application\b[^>]*\bandroid:appComponentFactory="([^"]+)"', xml_text)
+        if m2:
+            old_app_name = m2.group(1)
+            log("application has no android:name, will patch appComponentFactory: " + old_app_name)
+        else:
+            die("application has neither android:name nor appComponentFactory")
+
+    # 2. 读取原始二进制 AndroidManifest.xml
     with zipfile.ZipFile(input_apk) as z:
         if "AndroidManifest.xml" not in z.namelist():
             die("no AndroidManifest.xml in input apk")
         raw_axml = z.read("AndroidManifest.xml")
-    log("modifying binary AXML directly...")
-    new_axml = axml_mod.modify_application_name(raw_axml, "r.k.app")
-    binary_manifest.write_bytes(new_axml)
-    log("OK binary manifest modified (" + str(len(new_axml)) + " bytes)")
 
-    # 2. Build output APK
+    # 3. 二进制替换
+    new_value = "r.k.app" if old_app_name else "r.k.AppComponentFactory"
+    log("replacing '" + old_app_name + "' -> '" + new_value + "'")
+    new_axml = axml_replace_string(raw_axml, old_app_name, new_value)
+
+    binary_manifest = work / "AndroidManifest.bin"
+    binary_manifest.write_bytes(new_axml)
+    log("OK binary manifest patched (" + str(len(new_axml)) + " bytes)")
+
+    # 4. 构造输出 APK
     output_apk = work / "injected.apk"
     with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(output_apk, "w") as zout:
         for item in zin.infolist():
             if item.filename.startswith("META-INF/"):
                 continue
             zout.writestr(item, zin.read(item.filename))
-        log("copied " + str(len(zin.namelist())) + " original entries (skip META-INF)")
+        log("copied original entries (skip META-INF)")
 
-        # 3. Replace binary manifest
+        # 替换 manifest
         zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
         log("replaced AndroidManifest.xml")
 
-        # 4. Collect original dex numbers
+        # 收集原始 dex 编号
         original_numbers = set()
         for n in zout.namelist():
-            m = re.fullmatch(r"classes(\d*)\.dex", n)
-            if m:
-                num = int(m.group(1)) if m.group(1) else 1
+            mm = re.fullmatch(r"classes(\d*)\.dex", n)
+            if mm:
+                num = int(mm.group(1)) if mm.group(1) else 1
                 original_numbers.add(num)
         log(f"Original dex numbers: {sorted(original_numbers)}")
 
-        # 5. Pick next free classesN.dex
+        # 动态选下一个空闲 classesN.dex
         next_num = 1
         while True:
             name = "classes.dex" if next_num == 1 else f"classes{next_num}.dex"
@@ -267,7 +325,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
         log("Auto-selected new dex name: " + inject_name)
         zout.writestr(inject_name, dex_file.read_bytes())
 
-        # 6. Inject native libs
+        # 注入 native lib
         if so_dir:
             for abi in so_dir.iterdir():
                 if abi.is_dir():
@@ -276,7 +334,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
                         zout.writestr(arc, so.read_bytes())
                         log("inject " + arc)
 
-        # 7. Inject assets original
+        # 注入 assets 原包
         if original_apk:
             asset_arc = "assets/" + ASSET_DIR + "/" + ASSET_NAME
             zout.writestr(asset_arc, original_apk.read_bytes())

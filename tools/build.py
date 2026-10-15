@@ -206,7 +206,7 @@ def inject_classesN(input_apk, output_unsigned, dex_file, so_dir, original_apk, 
     # 1. apktool d -s 只解 manifest 和资源
     dec = work / "decoded"
     dec.mkdir(parents=True, exist_ok=True)
-    r = run(["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", "-o", str(dec), str(input_apk)])
+    r = run(["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-r", "-f", "--use-aapt2", "-o", str(dec), str(input_apk)])
     if r.returncode != 0:
         die("apktool d -s failed (manifest/res decode)")
 
@@ -218,7 +218,7 @@ def inject_classesN(input_apk, output_unsigned, dex_file, so_dir, original_apk, 
     #    实际上 apktool d -s 后，decoded 里没有 dex 文件，build 时不会生成 dex，
     #    所以需要手动把原 dex 从 input.apk 复制回 output。
     repacked = work / "repacked.apk"
-    r = run(["java", "-jar", str(APKTOOL_JAR), "b", "-o", str(repacked), str(dec)])
+    r = run(["java", "-jar", str(APKTOOL_JAR), "b", "-r", "--use-aapt2", "-o", str(repacked), str(dec)])
     if r.returncode != 0:
         die("apktool b failed")
     log("repacked (manifest/res only): " + str(repacked.stat().st_size) + " bytes")

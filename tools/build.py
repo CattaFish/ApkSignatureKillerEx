@@ -209,50 +209,281 @@ def compile_manifest_binary(xml_text, work):
     log("OK binary manifest (" + str(binary_manifest.stat().st_size) + " bytes)")
     return binary_manifest
 
-def inject(input_apk, dex_file, so_dir, original_apk, work):
-    """No apktool: copy zip entries, replace binary manifest, inject dex/so/assets."""
-    log("=== inject (no-apktool) ===")
+def axml_replace_string(raw, old, new):
+    """在 AXML 字符串池中原地替换字符串（NUL 终止，长度可短不可长）"""
+    # 尝试 UTF-8 池
+    old_b = old.encode('utf-8')
+    idx = raw.find(old_b)
+    if idx != -1:
+        new_b = new.encode('utf-8')
+        if len(new_b) > len(old_b):
+            raise ValueError("new string longer than old (utf8)")
+        buf = bytearray(raw)
+        buf[idx:idx+len(new_b)] = new_b
+        # 剩余全部填 0
+        for i in range(idx + len(new_b), idx + len(old_b)):
+            buf[i] = 0
+        return bytes(buf)
+    # 尝试 UTF-16 池
+    old_16 = old.encode('utf-16-le')
+    idx16 = raw.find(old_16)
+    if idx16 != -1:
+        new_16 = new.encode('utf-16-le')
+        if len(new_16) > len(old_16):
+            raise ValueError("new string longer than old (utf16)")
+        buf = bytearray(raw)
+        buf[idx16:idx16+len(new_16)] = new_16
+        # 剩余填 0（按 2 字节）
+        for i in range(idx16 + len(new_16), idx16 + len(old_16)):
+            buf[i] = 0
+        return bytes(buf)
+    raise ValueError("target string not found in AXML: " + old)
 
-    # 1. Extract binary manifest, modify directly via axml_modifier
-    import importlib.util
-    mod_path = ROOT / "tools" / "axml_modifier.py"
-    spec = importlib.util.spec_from_file_location("axml_modifier", mod_path)
-    axml_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(axml_mod)
 
-    binary_manifest = work / "AndroidManifest.bin"
+import struct as _struct
+
+
+def _read_uleb128(data: bytes, p: int):
+    """从 data[p] 解析一个 uleb128，返回 (值, 下一个位置)"""
+    result = 0
+    shift = 0
+    while p < len(data):
+        b = data[p]
+        p += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return result, p
+
+
+def _dex_get_string(data: bytes, string_ids_off: int, string_ids_size: int, idx: int):
+    """真正解析 DEX string_data_item：跳过 utf16_size 后读 MUTF-8 直到 0x00。
+
+    之前的 bug：把字符串内容第一个字节（如 'L'=0x4C=76）当成 uleb128 长度再解一遍，
+    导致所有类名都解析错误，永远匹配不上 target_desc。
+    """
+    if idx >= string_ids_size:
+        return None
+    str_off = _struct.unpack_from("<I", data, string_ids_off + idx * 4)[0]
+    p = str_off
+    # 跳过 uleb128 utf16_size（字符串的 UTF-16 长度）
+    _, p = _read_uleb128(data, p)
+    start = p
+    # MUTF-8 数据，0x00 结尾
+    while p < len(data) and data[p] != 0:
+        p += 1
+    try:
+        return data[start:p].decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
+    """检查 dex 是否真正定义（class_defs）了 target_desc 这个类"""
+    if len(dex_data) < 0x70:
+        return False
+    if dex_data[:4] != b"dex\n":
+        return False
+    # DEX header 字段偏移
+    string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
+    string_ids_off  = _struct.unpack_from("<I", dex_data, 0x3C)[0]
+    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x40)[0]
+    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x44)[0]
+    class_defs_size = _struct.unpack_from("<I", dex_data, 0x60)[0]
+    class_defs_off  = _struct.unpack_from("<I", dex_data, 0x64)[0]
+
+    if string_ids_off == 0 or type_ids_off == 0 or class_defs_off == 0:
+        return False
+
+    def get_type(idx):
+        if idx >= type_ids_size:
+            return None
+        tidx = _struct.unpack_from("<I", dex_data, type_ids_off + idx * 4)[0]
+        return _dex_get_string(dex_data, string_ids_off, string_ids_size, tidx)
+
+    # 遍历 class_defs，检查 class_idx 对应的 type 描述符
+    for i in range(class_defs_size):
+        cls_idx = _struct.unpack_from("<I", dex_data, class_defs_off + i * 32)[0]
+        t = get_type(cls_idx)
+        if t == target_desc:
+            return True
+    return False
+
+
+def dex_class_names(dex_data: bytes):
+    """返回该 dex 中所有 class_defs 的类名（用于诊断）"""
+    if len(dex_data) < 0x70 or dex_data[:4] != b"dex\n":
+        return []
+    string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
+    string_ids_off  = _struct.unpack_from("<I", dex_data, 0x3C)[0]
+    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x40)[0]
+    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x44)[0]
+    class_defs_size = _struct.unpack_from("<I", dex_data, 0x60)[0]
+    class_defs_off  = _struct.unpack_from("<I", dex_data, 0x64)[0]
+
+    names = []
+    for i in range(class_defs_size):
+        cls_idx = _struct.unpack_from("<I", dex_data, class_defs_off + i * 32)[0]
+        if cls_idx < type_ids_size:
+            tidx = _struct.unpack_from("<I", dex_data, type_ids_off + cls_idx * 4)[0]
+            s = _dex_get_string(dex_data, string_ids_off, string_ids_size, tidx)
+            if s:
+                names.append(s)
+    return names
+
+
+def find_tinker_dex(input_apk, work):
+    """在 APK 所有 dex 中找出真正定义 TinkerApplication 的那个"""
+    target = "Lcom/tencent/tinker/loader/app/TinkerApplication;"
     with zipfile.ZipFile(input_apk) as z:
-        if "AndroidManifest.xml" not in z.namelist():
-            die("no AndroidManifest.xml in input apk")
-        raw_axml = z.read("AndroidManifest.xml")
-    log("modifying binary AXML directly...")
-    new_axml = axml_mod.modify_application_name(raw_axml, "r.k.app")
-    binary_manifest.write_bytes(new_axml)
-    log("OK binary manifest modified (" + str(len(new_axml)) + " bytes)")
+        for n in sorted(z.namelist()):
+            if not n.endswith(".dex"):
+                continue
+            data = z.read(n)
+            if dex_defines_class(data, target):
+                log("TinkerApplication DEFINED in: " + n)
+                dex_path = work / n
+                dex_path.write_bytes(data)
+                return n, dex_path
+            # 诊断：没匹配上时，看看这个 dex 里有没有 Tinker 相关类
+            try:
+                names = dex_class_names(data)
+                tinker_like = [x for x in names if "Tinker" in x or "tinker" in x]
+                if tinker_like:
+                    log(f"  {n}: no exact match, Tinker-ish classes: {tinker_like[:20]}")
+            except Exception:
+                pass
+    die("dex defining TinkerApplication not found")
 
-    # 2. Build output APK
+
+def patch_tinker_application(input_apk, work):
+    """从 classes5.dex 提取 TinkerApplication，改 super 为 r.k.app + getTinkerFlags 返回 0，再写回。"""
+    log("=== patch TinkerApplication ===")
+
+    baksmali_jar = ROOT / "tools/baksmali.jar"
+    smali_jar = ROOT / "tools/smali.jar"
+    if not baksmali_jar.exists() or not smali_jar.exists():
+        die("baksmali.jar or smali.jar not found in tools/")
+
+    # 1. 精确定位定义 TinkerApplication 的 dex（通过 class_defs 解析）
+    target_dex, dex_path = find_tinker_dex(input_apk, work)
+
+    # 3. baksmali 反编译
+    smali_dir = work / "tinker_smali"
+    smali_dir.mkdir(parents=True, exist_ok=True)
+    r = run(["java", "-jar", str(baksmali_jar), "d", str(dex_path), "-o", str(smali_dir)])
+    if r.returncode != 0:
+        die("baksmali failed")
+
+    # 4. 修改 TinkerApplication.smali（先诊断目录结构）
+    ta_path = smali_dir / "com/tencent/tinker/loader/app/TinkerApplication.smali"
+    if not ta_path.exists():
+        log("=== DIAG: baksmali output structure ===")
+        # 列出所有 smali 文件
+        all_smali = list(smali_dir.rglob("*.smali"))
+        log(f"total smali files: {len(all_smali)}")
+        # 找包含 Tinker 的
+        tinker_files = [f for f in all_smali if "Tinker" in f.name or "tinker" in str(f)]
+        log(f"files containing Tinker: {len(tinker_files)}")
+        for f in tinker_files[:20]:
+            log("  " + str(f.relative_to(smali_dir)))
+        # 找 com/tencent/tinker 目录
+        tinker_dir = smali_dir / "com" / "tencent" / "tinker"
+        if tinker_dir.exists():
+            log("=== com/tencent/tinker exists ===")
+            for f in list(tinker_dir.rglob("*.smali"))[:30]:
+                log("  " + str(f.relative_to(smali_dir)))
+        else:
+            log("=== com/tencent/tinker NOT FOUND ===")
+            # 打印顶层目录
+            for d in sorted(smali_dir.iterdir()):
+                log("  top: " + d.name)
+        die("TinkerApplication.smali not found after baksmali")
+    smali_text = ta_path.read_text(encoding="utf-8")
+
+    # 4a. 改 super
+    if ".super Landroid/app/Application;" not in smali_text:
+        log("WARN: TinkerApplication.super is not Application, check content:")
+        for line in smali_text.splitlines()[:5]:
+            log("  " + line)
+    smali_text = smali_text.replace(
+        ".super Landroid/app/Application;",
+        ".super Lr/k/app;"
+    )
+
+    # 4b. 改 getTinkerFlags 返回 0
+    old_flags = """.method public getTinkerFlags()I
+    .registers 2
+
+    iget v0, p0, Lcom/tencent/tinker/loader/app/TinkerApplication;->tinkerFlags:I
+
+    return v0
+
+.end method"""
+    new_flags = """.method public getTinkerFlags()I
+    .registers 1
+
+    const/4 p0, 0x0
+
+    return p0
+
+.end method"""
+    if old_flags in smali_text:
+        smali_text = smali_text.replace(old_flags, new_flags)
+        log("getTinkerFlags patched to return 0")
+    else:
+        log("WARN: getTinkerFlags pattern not found, check method:")
+        m = re.search(r'\.method public getTinkerFlags\(\)I.*?\.end method', smali_text, re.DOTALL)
+        if m:
+            log(m.group(0))
+        else:
+            log("getTinkerFlags method not found at all")
+
+    ta_path.write_text(smali_text, encoding="utf-8")
+    log("TinkerApplication.smali patched")
+
+    # 5. smali 重新编译成 dex（新文件名 classes_patched.dex）
+    patched_dex = work / "classes_patched.dex"
+    r = run(["java", "-jar", str(smali_jar), "a", str(smali_dir), "-o", str(patched_dex)])
+    if r.returncode != 0:
+        die("smali assemble failed")
+    log("patched dex: " + str(patched_dex.stat().st_size) + " bytes")
+    return target_dex, patched_dex
+
+
+def inject(input_apk, dex_file, so_dir, original_apk, work):
+    """复制原 APK，patch TinkerApplication，注入 r.k.app dex + libk.so + assets，不修改 manifest。"""
+    log("=== inject (TinkerApplication patch mode) ===")
+
+    # 1. patch TinkerApplication
+    target_dex_name, patched_dex = patch_tinker_application(input_apk, work)
+
+    # 2. 构造输出 APK
     output_apk = work / "injected.apk"
     with zipfile.ZipFile(input_apk) as zin, zipfile.ZipFile(output_apk, "w") as zout:
+        # 复制全部条目，跳过 META-INF 签名
         for item in zin.infolist():
             if item.filename.startswith("META-INF/"):
                 continue
-            zout.writestr(item, zin.read(item.filename))
-        log("copied " + str(len(zin.namelist())) + " original entries (skip META-INF)")
+            # 替换被 patch 的 dex
+            if item.filename == target_dex_name:
+                zout.writestr(item, patched_dex.read_bytes())
+                log("replaced " + target_dex_name + " with patched version")
+            else:
+                zout.writestr(item, zin.read(item.filename))
+        log("copied original entries (skip META-INF)")
 
-        # 3. Replace binary manifest
-        zout.writestr("AndroidManifest.xml", binary_manifest.read_bytes())
-        log("replaced AndroidManifest.xml")
-
-        # 4. Collect original dex numbers
+        # 3. 收集原始 dex 编号
         original_numbers = set()
         for n in zout.namelist():
-            m = re.fullmatch(r"classes(\d*)\.dex", n)
-            if m:
-                num = int(m.group(1)) if m.group(1) else 1
+            mm = re.fullmatch(r"classes(\d*)\.dex", n)
+            if mm:
+                num = int(mm.group(1)) if mm.group(1) else 1
                 original_numbers.add(num)
         log(f"Original dex numbers: {sorted(original_numbers)}")
 
-        # 5. Pick next free classesN.dex
+        # 4. 动态挑下一个空闲 classesN.dex
         next_num = 1
         while True:
             name = "classes.dex" if next_num == 1 else f"classes{next_num}.dex"
@@ -267,7 +498,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
         log("Auto-selected new dex name: " + inject_name)
         zout.writestr(inject_name, dex_file.read_bytes())
 
-        # 6. Inject native libs
+        # 5. 注入 native lib
         if so_dir:
             for abi in so_dir.iterdir():
                 if abi.is_dir():
@@ -276,7 +507,7 @@ def inject(input_apk, dex_file, so_dir, original_apk, work):
                         zout.writestr(arc, so.read_bytes())
                         log("inject " + arc)
 
-        # 7. Inject assets original
+        # 6. 注入 assets 原包
         if original_apk:
             asset_arc = "assets/" + ASSET_DIR + "/" + ASSET_NAME
             zout.writestr(asset_arc, original_apk.read_bytes())

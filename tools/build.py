@@ -242,9 +242,48 @@ def axml_replace_string(raw, old, new):
 
 import struct as _struct
 
+
+def _read_uleb128(data: bytes, p: int):
+    """从 data[p] 解析一个 uleb128，返回 (值, 下一个位置)"""
+    result = 0
+    shift = 0
+    while p < len(data):
+        b = data[p]
+        p += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return result, p
+
+
+def _dex_get_string(data: bytes, string_ids_off: int, string_ids_size: int, idx: int):
+    """真正解析 DEX string_data_item：跳过 utf16_size 后读 MUTF-8 直到 0x00。
+
+    之前的 bug：把字符串内容第一个字节（如 'L'=0x4C=76）当成 uleb128 长度再解一遍，
+    导致所有类名都解析错误，永远匹配不上 target_desc。
+    """
+    if idx >= string_ids_size:
+        return None
+    str_off = _struct.unpack_from("<I", data, string_ids_off + idx * 4)[0]
+    p = str_off
+    # 跳过 uleb128 utf16_size（字符串的 UTF-16 长度）
+    _, p = _read_uleb128(data, p)
+    start = p
+    # MUTF-8 数据，0x00 结尾
+    while p < len(data) and data[p] != 0:
+        p += 1
+    try:
+        return data[start:p].decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
 def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
     """检查 dex 是否真正定义（class_defs）了 target_desc 这个类"""
     if len(dex_data) < 0x70:
+        return False
+    if dex_data[:4] != b"dex\n":
         return False
     # DEX header 字段偏移
     string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
@@ -257,35 +296,11 @@ def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
     if string_ids_off == 0 or type_ids_off == 0 or class_defs_off == 0:
         return False
 
-    def get_string(idx):
-        if idx >= string_ids_size:
-            return None
-        str_off = _struct.unpack_from("<I", dex_data, string_ids_off + idx * 4)[0]
-        p = str_off
-        # ULEB128 string length (we don't need it, skip to content)
-        while p < len(dex_data) and dex_data[p] & 0x80:
-            p += 1
-        p += 1  # skip last length byte
-        size = 0
-        shift = 0
-        while p < len(dex_data):
-            b = dex_data[p]
-            p += 1
-            size |= (b & 0x7F) << shift
-            if not (b & 0x80):
-                break
-            shift += 7
-        content = dex_data[p:p + size]
-        try:
-            return content.decode("utf-8", errors="replace")
-        except Exception:
-            return None
-
     def get_type(idx):
         if idx >= type_ids_size:
             return None
         tidx = _struct.unpack_from("<I", dex_data, type_ids_off + idx * 4)[0]
-        return get_string(tidx)
+        return _dex_get_string(dex_data, string_ids_off, string_ids_size, tidx)
 
     # 遍历 class_defs，检查 class_idx 对应的 type 描述符
     for i in range(class_defs_size):
@@ -294,6 +309,28 @@ def dex_defines_class(dex_data: bytes, target_desc: str) -> bool:
         if t == target_desc:
             return True
     return False
+
+
+def dex_class_names(dex_data: bytes):
+    """返回该 dex 中所有 class_defs 的类名（用于诊断）"""
+    if len(dex_data) < 0x70 or dex_data[:4] != b"dex\n":
+        return []
+    string_ids_size = _struct.unpack_from("<I", dex_data, 0x38)[0]
+    string_ids_off  = _struct.unpack_from("<I", dex_data, 0x3C)[0]
+    type_ids_size   = _struct.unpack_from("<I", dex_data, 0x40)[0]
+    type_ids_off    = _struct.unpack_from("<I", dex_data, 0x44)[0]
+    class_defs_size = _struct.unpack_from("<I", dex_data, 0x60)[0]
+    class_defs_off  = _struct.unpack_from("<I", dex_data, 0x64)[0]
+
+    names = []
+    for i in range(class_defs_size):
+        cls_idx = _struct.unpack_from("<I", dex_data, class_defs_off + i * 32)[0]
+        if cls_idx < type_ids_size:
+            tidx = _struct.unpack_from("<I", dex_data, type_ids_off + cls_idx * 4)[0]
+            s = _dex_get_string(dex_data, string_ids_off, string_ids_size, tidx)
+            if s:
+                names.append(s)
+    return names
 
 
 def find_tinker_dex(input_apk, work):
@@ -309,6 +346,14 @@ def find_tinker_dex(input_apk, work):
                 dex_path = work / n
                 dex_path.write_bytes(data)
                 return n, dex_path
+            # 诊断：没匹配上时，看看这个 dex 里有没有 Tinker 相关类
+            try:
+                names = dex_class_names(data)
+                tinker_like = [x for x in names if "Tinker" in x or "tinker" in x]
+                if tinker_like:
+                    log(f"  {n}: no exact match, Tinker-ish classes: {tinker_like[:20]}")
+            except Exception:
+                pass
     die("dex defining TinkerApplication not found")
 
 
